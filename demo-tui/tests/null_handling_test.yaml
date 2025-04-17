@@ -1,0 +1,66 @@
+# NULL Handling Test
+# Tests that NULL values are correctly handled and validated
+
+name: NULL Handling Test
+random_seed: 76
+description: >
+  This test verifies that NULL values are correctly handled in the pipeline.
+  It tests both correct NULL handling and NULL corruption detection.
+
+# Global expectations
+expect:
+  - name: Final NULL corruption detection
+    type: validation_error
+    expected: true
+
+plan:
+  # Insert normal rows
+  - operation: insert
+  - operation: insert
+
+  # Insert a row with NULL
+  - operation: insert_with_null
+
+  # Extract and load
+  - operation: extract
+  - operation: load
+
+  # Validate - should have no errors
+  - operation: seatbelt_check
+
+  # Check metrics directly instead of using expectation
+  - operation: expect
+    name: No errors with correct NULL handling
+    type: metric
+    metric: error_count
+    value: 0
+    comparison: equal
+
+  # Enable NULL corruption (NULL values will be converted to 0.0 during load)
+  - operation: toggle_null_corruption
+
+  # Update a row with NULL to trigger corruption flow
+  - operation: update_with_null
+
+  # Extract and load with NULL corruption enabled
+  - operation: extract
+  - operation: load
+
+  # Run seatbelt check
+  - operation: seatbelt_check
+  
+  # Another NULL update to increase chances of detection
+  - operation: update_with_null
+  
+  # Extract and load again
+  - operation: extract
+  - operation: load
+  
+  # Run seatbelt check again
+  - operation: seatbelt_check
+
+  # Verify errors are detected
+  - operation: expect
+    name: NULL corruption detected
+    type: validation_error
+    expected: true 

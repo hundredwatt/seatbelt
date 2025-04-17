@@ -1,3 +1,5 @@
+"""Core validation logic for the Seatbelt Demo."""
+
 import enum
 
 # Operation classifications
@@ -94,58 +96,4 @@ def check_for_validation_error(source_operation: Operation,
         if source_operation in [NOOP, DOES_NOT_EXIST] and destination_operation in [NOOP, DOES_NOT_EXIST]:
             return True
 
-    return False
-
-
-if __name__ == "__main__":
-    import json
-
-    # Load test cases
-    with open('validation_logic_tests.json', 'r') as f:
-        test_cases = json.load(f)
-
-    # Test determine_source_operation
-    print("\nTesting determine_source_operation:")
-    for test in test_cases['test_determine_source_operation']:
-        result = determine_source_operation(test['input']['checksum_1'],
-                                         test['input']['checksum_0'])
-        expected = Operation(test['expected']['value'])
-        passed = result == expected
-        print(f"{test['name']}: {'PASS' if passed else 'FAIL'}")
-        if not passed:
-            print(f"  Expected: {expected}")
-            print(f"  Got: {result}")
-            exit(1)
-
-    # Test determine_destination_operation
-    print("\nTesting determine_destination_operation:")
-    for test in test_cases['test_determine_destination_operation']:
-        result = determine_destination_operation(
-            test['input']['destination_present_end'],
-            test['input']['destination_updated'],
-            test['input']['destination_present_start']
-        )
-        expected = Operation(test['expected']['value'])
-        passed = result == expected
-        print(f"{test['name']}: {'PASS' if passed else 'FAIL'}")
-        if not passed:
-            print(f"  Expected: {expected}")
-            print(f"  Got: {result}")
-            exit(1)
-    # Test check_for_validation_error
-    print("\nTesting check_for_validation_error:")
-    for test in test_cases['test_check_for_validation_error']:
-        result = check_for_validation_error(
-            Operation(test['input']['source_operation']['value']),
-            Operation(test['input']['previous_source_operation']['value']),
-            Operation(test['input']['destination_operation']['value']),
-            Operation(test['input']['previous_destination_operation']['value']),
-            test['input']['existing_validation_error']
-        )
-        expected = test['expected']
-        passed = result == expected
-        print(f"{test['name']}: {'PASS' if passed else 'FAIL'}")
-        if not passed:
-            print(f"  Expected: {expected}")
-            print(f"  Got: {result}")
-            exit(1)
+    return False 
