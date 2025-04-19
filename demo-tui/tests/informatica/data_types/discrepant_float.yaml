@@ -1,0 +1,111 @@
+name: Float Boundary Test
+random_seed: 42
+
+schema:
+  columns:
+    - name: temperature
+      type: float
+      nullable: true
+
+initial_data:
+  row_count: 9
+  rows:
+    - temperature: null
+    - temperature: 0.0
+    - temperature: -0.0
+    - temperature: 1.0
+    - temperature: -1.0
+    - temperature: 1.7976931348623157e+308  # MAX
+    - temperature: 2.2250738585072014e-308  # MIN
+    - temperature: Infinity  # INF
+    - temperature: -Infinity  # -INF
+
+
+plan:
+  - operation: initialize
+
+  # Corrupt updates
+  - operation: corrupt_by_update
+    row:
+      id: 1
+      temperature: Infinity
+  - operation: corrupt_by_update
+    row:
+      id: 2
+      temperature: -Infinity
+  - operation: corrupt_by_update
+    row:
+      id: 3
+      temperature: NaN
+  - operation: corrupt_by_update
+    row:
+      id: 4
+      temperature: 1.7976931348623157e+308
+  - operation: corrupt_target
+    row:
+      id: 5
+      temperature: 2.2250738585072014e-308
+  - operation: corrupt_target
+    row:
+      id: 6
+      temperature: 0.0
+  - operation: corrupt_target
+    row:
+      id: 7
+      temperature: -0.0
+  - operation: corrupt_target
+    row:
+      id: 8
+      temperature: 1.0
+  - operation: corrupt_target
+    row:
+      id: 9
+      temperature: -1.0
+
+  # Run seatbelt validation check to detect the in-flight rows
+  - operation: seatbelt_check
+  - operation: expect
+    name: 4 in-flight rows
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 4
+
+  # Sync the data to the target database
+  - operation: extract
+  - operation: load
+
+  # Run seatbelt validation check again
+  - operation: seatbelt_check
+  # Expect validation errors
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: true
+  # Expect errors at all rows
+  - operation: expect
+    name: Error count
+    type: metric
+    metric: error_count
+    comparison: equal
+    value: 9
+  # Expect no rows in-flight
+  - operation: expect
+    name: No rows in-flight
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 0
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 9
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 9 

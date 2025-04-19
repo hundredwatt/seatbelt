@@ -1,0 +1,83 @@
+name: String Data Type Test
+random_seed: 42
+
+schema:
+  columns:
+    - name: text
+      type: string
+      nullable: true
+
+initial_data:
+  row_count: 5
+  rows:
+    - text: null
+    - text: ""
+    - text: "a"
+    - text: "abcdefghijklmnopqrstuvwxyz"
+    - text: "😀"
+
+plan:
+  - operation: initialize
+
+  # Valid updates
+  - operation: update
+    row:
+      id: 1
+      text: "abcdefghijklmnopqrstuvwxyz"
+  - operation: update
+    row:
+      id: 2
+      text: "😀"
+  - operation: update
+    row:
+      id: 3
+      text: null
+  - operation: update
+    row:
+      id: 4
+      text: ""
+  - operation: update
+    row:
+      id: 5
+      text: "a"
+
+  # Run seatbelt validation check to detect the in-flight rows
+  - operation: seatbelt_check
+  - operation: expect
+    name: 5 in-flight rows
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 5
+
+  # Sync the data to the target database
+  - operation: extract
+  - operation: load
+
+  # Run seatbelt validation check again
+  - operation: seatbelt_check
+  # Expect no validation errors
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: false
+  # Expect no rows in-flight
+  - operation: expect
+    name: No rows in-flight
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 0
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 5
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 5 

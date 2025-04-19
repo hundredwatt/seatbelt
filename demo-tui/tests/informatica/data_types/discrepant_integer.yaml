@@ -1,0 +1,96 @@
+name: Integer Boundary Test
+random_seed: 42
+
+schema:
+  columns:
+    - name: temperature
+      type: integer
+      nullable: true
+
+initial_data:
+  row_count: 6
+  rows:
+    - temperature: null
+    - temperature: 0
+    - temperature: 1
+    - temperature: -1
+    - temperature: 2147483647
+    - temperature: -2147483648
+
+
+plan:
+  - operation: initialize
+
+  # Corrupt updates
+  - operation: corrupt_by_update
+    row:
+      id: 1
+      temperature: -2147483648
+  - operation: corrupt_by_update
+    row:
+      id: 2
+      temperature: 2147483647
+  - operation: corrupt_by_update
+    row:
+      id: 3
+      temperature: -1
+  - operation: corrupt_target
+    row:
+      id: 4
+      temperature: 1
+  - operation: corrupt_target
+    row:
+      id: 5
+      temperature: 0
+  - operation: corrupt_target
+    row:
+      id: 6
+      temperature: null
+
+  # Run seatbelt validation check to detect the in-flight rows
+  - operation: seatbelt_check
+  - operation: expect
+    name: 3 in-flight rows
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 3
+
+  # Sync the data to the target database
+  - operation: extract
+  - operation: load
+
+  # Run seatbelt validation check again to see some valid and some discrepant rows
+  - operation: seatbelt_check
+  # Expect validation errors
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: true
+  # Expect errors at all rows
+  - operation: expect
+    name: No rows in-flight
+    type: metric
+    metric: error_count
+    comparison: equal
+    value: 6
+  # Expect no rows in-flight
+  - operation: expect
+    name: No rows in-flight
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 0
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 6
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 6 

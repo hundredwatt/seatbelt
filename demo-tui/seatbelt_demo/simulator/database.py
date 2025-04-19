@@ -12,6 +12,7 @@ class ColumnType(Enum):
     """Supported data column types"""
     INTEGER = "integer"
     FLOAT = "float"
+    DECIMAL = "decimal"
     STRING = "string"
     BOOLEAN = "boolean"
     DATE = "date"
@@ -54,7 +55,7 @@ class SchemaDefinition:
 @dataclass
 class InitialData:
     """Initial data configuration for the database"""
-    row_count: int = 10
+    row_count: int = 3
     rows: List[Dict[str, Any]] = field(default_factory=list)
     
     def add_row(self, row: Dict[str, Any]) -> None:
@@ -207,6 +208,9 @@ class Database:
             return random.randint(1, 1000)
         elif column_type == ColumnType.FLOAT:
             return round(random.random() * 100, 2)
+        elif column_type == ColumnType.DECIMAL:
+            # For DECIMAL(10,2), generate values with exactly 2 decimal places
+            return round(random.random() * 100000000, 2)
         elif column_type == ColumnType.STRING:
             return self.fake.word()
         elif column_type == ColumnType.BOOLEAN:
@@ -221,6 +225,9 @@ class Database:
     def _transform_for_target(self, source_value: Any, column: ColumnDefinition) -> Any:
         """Transform a value from source type to target type if needed"""
         if source_value is None or not column.target_type or column.type == column.target_type:
+            # For DECIMAL type, ensure we always format with 2 decimal places
+            if column.type == ColumnType.DECIMAL and source_value is not None:
+                return round(float(source_value), 2)
             return source_value
             
         # Transform based on target type
@@ -236,6 +243,12 @@ class Database:
                 return float(source_value)
             except (ValueError, TypeError):
                 return 0.0
+        elif column.target_type == ColumnType.DECIMAL:
+            # Convert to decimal (formatted as float with fixed precision)
+            try:
+                return round(float(source_value), 2)
+            except (ValueError, TypeError):
+                return 0.00
         elif column.target_type == ColumnType.STRING:
             # Convert to string
             return str(source_value)
@@ -257,6 +270,7 @@ class Database:
     
     def insert_row(self, metrics_tracker, sync_state, custom_values=None):
         """Insert a new row into the source database with optional custom values"""
+        # Print stack trace of the caller
         new_row = {
             'ts': self.source_sequence_no,
             'id': self.primary_key_sequence_no,
@@ -477,4 +491,61 @@ class Database:
         
         logging.info(f"TARGET CORRUPTED: id={row_id}, column={column_to_corrupt}, old_value={original_value}, new_value={new_value}")
         
-        return row_id 
+        return row_id
+        
+    def corrupt_target_with_row(self, metrics_tracker, row_id, row_data):
+        """Directly corrupt a target row with specified data
+        
+        Args:
+            metrics_tracker: The metrics tracker to update
+            row_id: ID of the row to corrupt
+            row_data: Dictionary of column values to set in the target row
+        """
+        # Check if the row exists in the target database
+        if row_id not in self.target_db:
+            logging.warning(f"Row ID {row_id} not found in target database")
+            return False
+            
+        target_row = self.target_db[row_id]
+        
+        # Keep track of changed columns for logging
+        changed_columns = []
+        
+        # Update the row with the provided values
+        for column_name, new_value in row_data.items():
+            # Skip 'id' column as it's the primary key
+            if column_name == 'id':
+                continue
+                
+            # Check if the column exists in schema
+            column_def = self.schema.get_column_by_name(column_name)
+            if not column_def:
+                logging.warning(f"Column {column_name} not found in schema")
+                continue
+                
+            # Record the original value for logging
+            original_value = target_row.get(column_name)
+            
+            # Update the value
+            target_row[column_name] = new_value
+            
+            # Track the change
+            changed_columns.append((column_name, original_value, new_value))
+        
+        # Update the row in the target database
+        self.target_db[row_id] = target_row
+        
+        # Increment corruption count
+        metrics_tracker.increment("corruption_count")
+        
+        # Log the changes
+        if changed_columns:
+            log_parts = [f"TARGET CORRUPTED: id={row_id}"]
+            for col_name, old_val, new_val in changed_columns:
+                log_parts.append(f"{col_name}: {old_val} -> {new_val}")
+            logging.info(", ".join(log_parts))
+            
+            return row_id
+        else:
+            logging.info(f"No changes made to row id={row_id}")
+            return False 

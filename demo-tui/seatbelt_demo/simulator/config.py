@@ -35,7 +35,7 @@ def load_config_file(file_path: Union[str, Path]) -> Dict[str, Any]:
 def create_schema_from_config(config: Dict[str, Any]) -> SchemaDefinition:
     """Create a schema definition from a configuration dict."""
     if 'schema' not in config:
-        raise ConfigurationError("Schema configuration missing")
+        return None
     
     schema_config = config['schema']
     schema = SchemaDefinition()
@@ -83,20 +83,21 @@ def create_schema_from_config(config: Dict[str, Any]) -> SchemaDefinition:
     
     return schema
 
-def create_initial_data_from_config(config: Dict[str, Any]) -> InitialData:
+def create_initial_data_from_config(config: Dict[str, Any]) -> Optional[InitialData]:
     """Create initial data configuration from a configuration dict."""
     if 'initial_data' not in config:
-        return InitialData()  # Use defaults
-    
+        return None  # Return None if not specified in config
+
     initial_data_config = config['initial_data']
-    row_count = initial_data_config.get('row_count', 10)
-    
+    # Default row_count to 0 if not specified when initial_data *is* present
+    row_count = initial_data_config.get('row_count', 0)
+
     initial_data = InitialData(row_count=row_count)
-    
+
     # Load explicit rows if provided
     for row_config in initial_data_config.get('rows', []):
         initial_data.add_row(row_config)
-    
+
     return initial_data
 
 def load_simulator_config(file_path: Union[str, Path]) -> Dict[str, Any]:
@@ -168,26 +169,9 @@ def save_config_to_file(config: Dict[str, Any], file_path: Union[str, Path]) -> 
 
 def get_default_config() -> Dict[str, Any]:
     """Get a default configuration."""
-    schema = SchemaDefinition()
-    
-    # Add name column
-    name_column = ColumnDefinition(
-        name='name',
-        type=ColumnType.STRING,
-        nullable=False
-    )
-    schema.add_column(name_column)
-    
-    # Add score column
-    score_column = ColumnDefinition(
-        name='score',
-        type=ColumnType.FLOAT,
-        nullable=True
-    )
-    schema.add_column(score_column)
+    # Removed schema definition here - Database class provides its own default
     
     return {
-        'schema': schema,
         'initial_data': InitialData(),
         'random_seed': 42,
         'seatbelt_interval': 25

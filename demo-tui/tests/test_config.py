@@ -197,8 +197,12 @@ class TestRunner:
         elif operation == 'insert_with_null':
             simulator.insert_with_null()
         elif operation == 'update':
-            row = step.get('row')
-            row_id = step.get('id')
+            row = step.get('row', {})
+            # First check if row_id is specified in the row data
+            row_id = row.get('id') if row else None
+            # If not, check if it's specified at the top level
+            if row_id is None:
+                row_id = step.get('id')
             simulator.update_row(row_id, row)
         elif operation == 'update_with_null':
             simulator.update_with_null()
@@ -211,11 +215,29 @@ class TestRunner:
         elif operation == 'seatbelt_check':
             simulator.seatbelt_check()
         elif operation == 'corrupt_by_update':
-            simulator.corrupt_by_update()
+            # Check if a specific row is provided for corruption
+            if 'row' in step:
+                row_data = step['row'].copy()
+                simulator.corrupt_by_update(row_data)
+            else:
+                simulator.corrupt_by_update()
         elif operation == 'corrupt_by_insert':
             simulator.corrupt_by_insert()
+        elif operation == 'corrupt_by_delete':
+            simulator.corrupt_by_delete()
         elif operation == 'corrupt_target':
-            simulator.corrupt_target_score()
+            # Check if a specific row is provided for corruption
+            if 'row' in step:
+                row_data = step['row'].copy()
+                # Extract row_id if specified in the row data
+                row_id = row_data.get('id')
+                if row_id is not None:
+                    simulator.corrupt_target_with_row(row_id, row_data)
+                else:
+                    simulator.corrupt_target_score()
+            else:
+                # Fall back to random corruption
+                simulator.corrupt_target_score()
         elif operation == 'toggle_null_corruption':
             simulator.toggle_null_corruption()
         elif operation == 'random_operation':

@@ -10,9 +10,12 @@ from .logic import (
     INSERT_AND_UPDATE,
     UPDATE_AND_DELETE,
     TRANSIENT_UPDATE,
+    UTINYINT_TO_OPERATION,
+    operation_from_int,
     determine_source_operation,
     determine_destination_operation,
-    check_for_validation_error
+    check_for_validation_error,
+    verify_row_integrity_from_incremental_checksums
 )
 
 __all__ = [
@@ -25,7 +28,10 @@ __all__ = [
     'INSERT_AND_UPDATE',
     'UPDATE_AND_DELETE',
     'TRANSIENT_UPDATE',
+    'UTINYINT_TO_OPERATION',
+    'operation_from_int',
     'determine_source_operation',
     'determine_destination_operation',
-    'check_for_validation_error'
+    'check_for_validation_error',
+    'verify_row_integrity_from_incremental_checksums'
 ] 

@@ -222,7 +222,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Seatbelt Demo TUI')
     parser.add_argument('--check-only', action='store_true', help='Run initialization only and exit immediately (for error checking)')
     parser.add_argument('--config', type=str, help='Path to custom schema configuration file (YAML or JSON)')
-    parser.add_argument('--plan', type=str, help='Path to a test plan file to execute step by step')
+    parser.add_argument('--no-plan', action='store_true', help='Do not run the plan even if one is included in the config file')
     return parser.parse_args()
 
 def draw_source_db(stdscr, y, x, height, width, state, sim_state):
@@ -932,10 +932,9 @@ def execute_plan_step(state):
     # Get the current step
     current_step = state.plan_execution_state["current_step"]
     operation = state.plan_execution_state["plan"][current_step]
-    
-    # Get operation type (removed logging here)
+    repeat = False
     op_type = operation.get('operation', 'unknown')
-    
+
     # Execute the operation
     try:
         if op_type == 'initialize':
@@ -950,8 +949,9 @@ def execute_plan_step(state):
             row = operation.get('row')
             state.simulator.insert_row(row)
         elif op_type == 'update':
-            row = operation.get('row')
-            row_id = operation.get('id')
+            row = operation.get('row', {})
+            # Extract row_id from the row object itself
+            row_id = row.get('id')
             state.simulator.update_row(row_id, row)
         elif op_type == 'delete':
             state.simulator.delete_row()
@@ -962,6 +962,49 @@ def execute_plan_step(state):
         elif op_type == 'seatbelt_check':
             start_seatbelt_animation(state)
             state.simulator.seatbelt_check()
+        elif op_type == 'corrupt_by_insert':
+            state.simulator.corrupt_by_insert()
+        elif op_type == 'corrupt_by_update':
+            # Check if a specific row is provided for corruption
+            if 'row' in operation:
+                row_data = operation['row']
+                state.simulator.corrupt_by_update(row_data)
+            else:
+                state.simulator.corrupt_by_update()
+        elif op_type == 'corrupt_by_delete':
+            state.simulator.corrupt_by_delete()
+        elif op_type == 'insert_with_null':
+            column = operation.get('column')
+            state.simulator.insert_with_null(column)
+        elif op_type == 'update_with_null':
+            column = operation.get('column')
+            state.simulator.update_with_null(column)
+        elif op_type == 'remove_from_filter':
+            state.simulator.remove_from_filter()
+        elif op_type == 'toggle_null_corruption':
+            column = operation.get('column')
+            state.simulator.toggle_null_corruption(column)
+        elif op_type == 'set_null_corruption':
+            column = operation.get('column')
+            enabled = operation.get('enabled', True)
+            state.simulator.set_null_corruption_for_column(column, enabled)
+        elif op_type == 'random':
+            state.simulator.random_operation()
+        elif op_type == 'corrupt_target':
+            # Check if a specific row is provided for corruption
+            if 'row' in operation:
+                row_data = operation['row'].copy()
+                # Extract row_id if specified in the row data
+                row_id = row_data.get('id')
+                if row_id is not None:
+                    state.simulator.corrupt_target_with_row(row_id, row_data)
+                else:
+                    state.simulator.corrupt_target_score()
+            else:
+                # Fall back to random corruption
+                state.simulator.corrupt_target_score()
+        elif op_type == 'expect':
+            repeat = True
         else:
             logging.warning(f"Unknown operation type: {op_type}")
     except Exception as e:
@@ -975,6 +1018,8 @@ def execute_plan_step(state):
         logging.info("Plan execution completed")
         state.plan_execution_state["active"] = False
         return True
+    elif repeat:
+        return execute_plan_step(state)
     else:
         # Wait for user input before next step
         state.plan_execution_state["waiting_for_input"] = True
@@ -1063,6 +1108,18 @@ def run_ui_loop(stdscr, state, log_handler):
                                 'initialize': 'init'
                             }.get(op_type, '?')
                             
+                            # Add handlers for new plan step types
+                            if op_type == 'corrupt_by_insert': key_char = '^i'
+                            elif op_type == 'corrupt_by_update': key_char = '^u'
+                            elif op_type == 'corrupt_by_delete': key_char = '^d'
+                            elif op_type == 'corrupt_target': key_char = '^x'
+                            elif op_type == 'insert_with_null': key_char = 'I'
+                            elif op_type == 'update_with_null': key_char = 'U'
+                            elif op_type == 'remove_from_filter': key_char = 'r'
+                            elif op_type == 'toggle_null_corruption': key_char = 'n'
+                            elif op_type == 'set_null_corruption': key_char = 'n' # Use 'n' as well
+                            elif op_type == 'random': key_char = '*' # Use * for random
+
                             state.key_buffer.append(key_char)
                             if len(state.key_buffer) > 32:
                                 state.key_buffer.pop(0)
@@ -1215,12 +1272,26 @@ def main(stdscr, args, log_handler):
     # Initialize TUI state
     state = TUIState()
     
-    # Initialize simulator
+    # Initialize simulator and potentially load plan
+    plan = None
+    
     # Use the config file if provided
     if args.config:
         try:
             state.simulator = Simulator.from_config_file(args.config)
             logger.info(f"Loaded custom schema from {args.config}")
+            
+            # Check if config file includes a plan
+            if not args.no_plan:
+                # Try to load the plan from the same config file
+                import yaml
+                with open(args.config, 'r') as f:
+                    config_data = yaml.safe_load(f)
+                    if 'plan' in config_data and isinstance(config_data['plan'], list):
+                        plan = config_data['plan']
+                        logger.info(f"Plan loaded from config file with {len(plan)} steps")
+                    else:
+                        logger.info("No plan found in config file")
         except Exception as e:
             logger.error(f"Error loading configuration file: {e}")
             logger.info("Falling back to default schema")
@@ -1274,24 +1345,20 @@ def main(stdscr, args, log_handler):
         stdscr.keypad(True)
         stdscr.nodelay(True)
         
-        # If a plan file was provided, load and start executing it
-        if args.plan:
-            logger.info(f"Loading plan from {args.plan}")
-            plan = load_plan_from_file(args.plan)
-            if plan:
-                logger.info(f"Plan loaded with {len(plan)} steps")
-                state.plan_execution_state = {
-                    "active": True,
-                    "plan": plan,
-                    "current_step": 0,
-                    "total_steps": len(plan),
-                    "waiting_for_input": False
-                }
-                # Start the first step right away
+        # If a plan was loaded, start executing it
+        if plan and not args.no_plan:
+            logger.info(f"Starting plan execution with {len(plan)} steps")
+            state.plan_execution_state = {
+                "active": True,
+                "plan": plan,
+                "current_step": 0,
+                "total_steps": len(plan),
+                "waiting_for_input": False
+            }
+            # Execute first plan step if first plan step is initialize
+            if plan[0]['operation'] == 'initialize':
                 execute_plan_step(state)
-                state.plan_execution_state["waiting_for_input"] = True
-            else:
-                logger.error("Failed to load plan. Starting in normal mode.")
+            state.plan_execution_state["waiting_for_input"] = True
         else:
             # Add some initial data only if a config file with initial_data wasn't used
             sim_state = state.simulator.get_state()

@@ -1,0 +1,347 @@
+{
+  "test_determine_source_operation": [
+    {
+      "name": "Both checksums null returns DOES_NOT_EXIST",
+      "input": {
+        "checksum_1": null,
+        "checksum_0": null
+      },
+      "expected": {"name": "DOES_NOT_EXIST", "value": 1}
+    },
+    {
+      "name": "New checksum only returns INSERT",
+      "input": {
+        "checksum_1": "abc123",
+        "checksum_0": null
+      },
+      "expected": {"name": "INSERT", "value": 3}
+    },
+    {
+      "name": "Old checksum only returns DELETE",
+      "input": {
+        "checksum_1": null,
+        "checksum_0": "abc123"
+      },
+      "expected": {"name": "DELETE", "value": 5}
+    },
+    {
+      "name": "Different checksums returns UPDATE",
+      "input": {
+        "checksum_1": "abc123",
+        "checksum_0": "def456"
+      },
+      "expected": {"name": "UPDATE", "value": 4}
+    },
+    {
+      "name": "Same checksums returns NOOP",
+      "input": {
+        "checksum_1": "abc123",
+        "checksum_0": "abc123"
+      },
+      "expected": {"name": "NOOP", "value": 2}
+    }
+  ],
+  "test_determine_destination_operation": [
+    {
+      "name": "Present throughout with update",
+      "input": {
+        "destination_present_end": true,
+        "destination_updated": true,
+        "destination_present_start": true
+      },
+      "expected": {"name": "UPDATE", "value": 4}
+    },
+    {
+      "name": "Present at end with update, not at start",
+      "input": {
+        "destination_present_end": true,
+        "destination_updated": true,
+        "destination_present_start": false
+      },
+      "expected": {"name": "INSERT_AND_UPDATE", "value": 6}
+    },
+    {
+      "name": "Present throughout without update",
+      "input": {
+        "destination_present_end": true,
+        "destination_updated": false,
+        "destination_present_start": true
+      },
+      "expected": {"name": "NOOP", "value": 2}
+    },
+    {
+      "name": "New insertion",
+      "input": {
+        "destination_present_end": true,
+        "destination_updated": false,
+        "destination_present_start": false
+      },
+      "expected": {"name": "INSERT", "value": 3}
+    },
+    {
+      "name": "Update followed by deletion",
+      "input": {
+        "destination_present_end": false,
+        "destination_updated": true,
+        "destination_present_start": true
+      },
+      "expected": {"name": "UPDATE_AND_DELETE", "value": 7}
+    },
+    {
+      "name": "Transient update",
+      "input": {
+        "destination_present_end": false,
+        "destination_updated": true,
+        "destination_present_start": false
+      },
+      "expected": {"name": "TRANSIENT_UPDATE", "value": 8}
+    },
+    {
+      "name": "Simple deletion",
+      "input": {
+        "destination_present_end": false,
+        "destination_updated": false,
+        "destination_present_start": true
+      },
+      "expected": {"name": "DELETE", "value": 5}
+    },
+    {
+      "name": "Never existed",
+      "input": {
+        "destination_present_end": false,
+        "destination_updated": false,
+        "destination_present_start": false
+      },
+      "expected": {"name": "DOES_NOT_EXIST", "value": 1}
+    }
+  ],
+  "test_check_for_validation_error": [
+    {
+      "name": "Previous change disappeared without destination change",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "UPDATE", "value": 4},
+        "destination_operation": {"name": "NOOP", "value": 2},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "Source exists but not in destination",
+      "input": {
+        "source_operation": {"name": "UPDATE", "value": 4},
+        "previous_source_operation": {"name": "UPDATE", "value": 4},
+        "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "Source never existed but destination shows NOOP",
+      "input": {
+        "source_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_source_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "destination_operation": {"name": "NOOP", "value": 2},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "Existing error persists with no changes",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "NOOP", "value": 2},
+        "destination_operation": {"name": "NOOP", "value": 2},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": true
+      },
+      "expected": true
+    },
+    {
+      "name": "Valid state",
+      "input": {
+        "source_operation": {"name": "UPDATE", "value": 4},
+        "previous_source_operation": {"name": "UPDATE", "value": 4},
+        "destination_operation": {"name": "UPDATE", "value": 4},
+        "previous_destination_operation": {"name": "UPDATE", "value": 4},
+        "existing_validation_error": false
+      },
+      "expected": false
+    },
+    {
+      "name": "NOOP source with INSERT history but missing destination",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "INSERT", "value": 3},
+        "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "UPDATE source with INSERT history but missing destination",
+      "input": {
+        "source_operation": {"name": "UPDATE", "value": 4},
+        "previous_source_operation": {"name": "INSERT", "value": 3},
+        "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "everything is NOOP",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "NOOP", "value": 2},
+        "destination_operation": {"name": "NOOP", "value": 2},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": false
+      },
+      "expected": false
+    },
+    {
+      "name": "Corrupted destination",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "NOOP", "value": 2},
+        "destination_operation": {"name": "UPDATE", "value": 4},
+        "previous_destination_operation": {"name": "UPDATE", "value": 4},
+        "existing_validation_error": false
+      },
+      "expected": true
+    },
+    {
+      "name": "Deletes never seen by the destination",
+      "input": {
+        "source_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_source_operation": {"name": "DELETE", "value": 5},
+        "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "existing_validation_error": false
+      },
+      "expected": false
+    },
+    {
+      "name": "Delete that failed to replicate",
+      "input": {
+        "source_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+        "previous_source_operation": {"name": "DELETE", "value": 5},
+        "destination_operation": {"name": "NOOP", "value": 2},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": false
+      },
+      "expected": true
+    }
+  ],
+  "test_row_integrity_from_incremental_checksums": [
+    {
+      "name": "No incremental checksums",
+      "input": {
+        "incremental_source_checksum": null,
+        "incremental_destination_checksum": null,
+        "source_checksum": "abc",
+        "destination_checksum": "pdq"
+      },
+      "expected": true
+    },
+    {
+      "name": "Matching checksums",
+      "input": {
+        "incremental_source_checksum": "abc",
+        "incremental_destination_checksum": "xyz",
+        "source_checksum": "abc",
+        "destination_checksum": "xyz"
+      },
+      "expected": true
+    },
+    {
+      "name": "Mismatching checksums",
+      "input": {
+        "incremental_source_checksum": "abc",
+        "incremental_destination_checksum": "xyz",
+        "source_checksum": "abc",
+        "destination_checksum": "pdq"
+      },
+      "expected": false
+    }
+  ],
+  "test_check_for_validation_error_with_row_integrity": [
+    {
+      "name": "Corrupted destination",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "UPDATE", "value": 4},
+        "destination_operation": {"name": "INSERT", "value": 3},
+        "previous_destination_operation": {"name": "INSERT", "value": 3},
+        "existing_validation_error": false,
+        "row_verified": false
+      },
+      "expected": true
+    },
+    {
+      "name": "Initial validation run",
+      "input": {
+          "source_operation": {"name": "INSERT", "value": 3},
+          "previous_source_operation": {"name": "INSERT", "value": 3},
+          "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+          "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+          "existing_validation_error": false,
+          "row_verified": true
+        },
+      "expected": false
+    },
+    {
+      "name": "Initial validation run",
+      "input": {
+          "source_operation": {"name": "INSERT", "value": 3},
+          "previous_source_operation": {"name": "INSERT", "value": 3},
+          "destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+          "previous_destination_operation": {"name": "DOES_NOT_EXIST", "value": 1},
+          "existing_validation_error": false,
+          "row_verified": true
+        },
+      "expected": false
+    },
+    {
+      "name": "Incorrect row in initial validation run",
+      "input": {
+          "source_operation": {"name": "NOOP", "value": 2},
+          "previous_source_operation": {"name": "NOOP", "value": 2},
+          "destination_operation": {"name": "INSERT", "value": 3},
+          "previous_destination_operation": {"name": "INSERT", "value": 3},
+          "existing_validation_error": false,
+          "row_verified": false
+        },
+      "expected": true
+    },
+    {
+      "name": "Pending update in source",
+      "input": {
+          "source_operation": {"name": "UPDATE", "value": 4},
+          "previous_source_operation": {"name": "NOOP", "value": 2},
+          "destination_operation": {"name": "NOOP", "value": 2},
+          "previous_destination_operation": {"name": "NOOP", "value": 2},
+          "existing_validation_error": false,
+          "row_verified": false
+        },
+      "expected": false
+    },
+    {
+      "name": "Previous validation error persists",
+      "input": {
+          "source_operation": {"name": "NOOP", "value": 2},
+          "previous_source_operation": {"name": "NOOP", "value": 2},
+          "destination_operation": {"name": "NOOP", "value": 2},
+          "previous_destination_operation": {"name": "NOOP", "value": 2},
+          "existing_validation_error": true,
+          "row_verified": false
+        },
+      "expected": true
+    }
+  ]
+}

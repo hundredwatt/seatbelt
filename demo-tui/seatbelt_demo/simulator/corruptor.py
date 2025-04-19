@@ -11,53 +11,75 @@ class Corruptor:
         self.corrupt_filter = set()  # IDs that should be filtered out of the pipeline
         self.corrupt_nulls = False   # Whether NULL values should be corrupted
     
-    def corrupt_by_update(self, database, metrics_tracker, sync_state):
-        """Update a row in the source and add its ID to the corrupt filter"""
+    def corrupt_by_update(self, database, metrics_tracker, sync_state, row=None):
+        """Update a row in the source and add its ID to the corrupt filter
+        
+        Args:
+            database: The database instance
+            metrics_tracker: The metrics tracker instance
+            sync_state: The current sync state
+            row: Optional dictionary with row values including id to update
+        """
         # Safety check
         if len(database.source_db) == 0:
             logging.info("No rows to update in corrupt_by_update")
             return False
             
         # Choose a row
-        row_id = random.choice(list(database.source_db.keys()))
+        if row and 'id' in row:
+            row_id = row['id']
+            if row_id not in database.source_db:
+                logging.info(f"Row id={row_id} not found in source_db for corrupt_by_update")
+                return False
+        else:
+            row_id = random.choice(list(database.source_db.keys()))
+            
         original_row = database.source_db[row_id]
         
         # Create updated row
         new_row = original_row.copy()
         new_row['ts'] = database.source_sequence_no
         
-        # Update one or more columns
-        updated_columns = []
-        
-        for column in database.schema.columns:
-            if column.name == 'id':
-                continue  # Don't update ID
+        # If row is provided, use those values
+        if row:
+            for key, value in row.items():
+                if key != 'id' and key != 'ts':  # Don't override id or ts
+                    new_row[key] = value
+            updated_columns = [(key, original_row.get(key), value) for key, value in row.items() 
+                              if key != 'id' and key != 'ts' and original_row.get(key) != value]
+        else:
+            # Update one or more columns randomly
+            updated_columns = []
             
-            # 50% chance to update each column
-            if random.random() < 0.5:
-                old_value = original_row.get(column.name)
-                if column.generator:
-                    new_value = column.generator()
-                else:
-                    new_value = database._generate_value_for_type(column.type, column.nullable)
+            for column in database.schema.columns:
+                if column.name == 'id':
+                    continue  # Don't update ID
                 
-                new_row[column.name] = new_value
-                updated_columns.append((column.name, old_value, new_value))
-        
-        # Ensure at least one column is updated
-        if not updated_columns:
-            # Choose a random column to update
-            updateable_columns = [col for col in database.schema.columns if col.name != 'id']
-            if updateable_columns:
-                column = random.choice(updateable_columns)
-                old_value = original_row.get(column.name)
-                if column.generator:
-                    new_value = column.generator()
-                else:
-                    new_value = database._generate_value_for_type(column.type, column.nullable)
-                
-                new_row[column.name] = new_value
-                updated_columns.append((column.name, old_value, new_value))
+                # 50% chance to update each column
+                if random.random() < 0.5:
+                    old_value = original_row.get(column.name)
+                    if column.generator:
+                        new_value = column.generator()
+                    else:
+                        new_value = database._generate_value_for_type(column.type, column.nullable)
+                    
+                    new_row[column.name] = new_value
+                    updated_columns.append((column.name, old_value, new_value))
+            
+            # Ensure at least one column is updated
+            if not updated_columns:
+                # Choose a random column to update
+                updateable_columns = [col for col in database.schema.columns if col.name != 'id']
+                if updateable_columns:
+                    column = random.choice(updateable_columns)
+                    old_value = original_row.get(column.name)
+                    if column.generator:
+                        new_value = column.generator()
+                    else:
+                        new_value = database._generate_value_for_type(column.type, column.nullable)
+                    
+                    new_row[column.name] = new_value
+                    updated_columns.append((column.name, old_value, new_value))
         
         # Add to operation log
         database.source_db_log.append(new_row)
@@ -141,6 +163,46 @@ class Corruptor:
         
         logging.info(", ".join(log_parts))
         logging.info(f"CORRUPT FILTER: Added id={row_id} after insert")
+        
+        return row_id
+    
+    def corrupt_by_delete(self, database, metrics_tracker, sync_state):
+        """Delete a row and add its ID to the corrupt filter to prevent loading"""
+        # Safety check
+        if len(database.source_db) == 0:
+            logging.info("No rows to delete in corrupt_by_delete")
+            return False
+            
+        # Choose a row to delete
+        row_id = random.choice(list(database.source_db.keys()))
+        
+        # Add to operation log with deleted flag set to True
+        deleted_row = database.source_db[row_id].copy()
+        deleted_row['ts'] = database.source_sequence_no
+        deleted_row['deleted'] = True
+        database.source_db_log.append(deleted_row)
+        
+        # Remove from materialized view
+        del database.source_db[row_id]
+        
+        # Update metadata
+        database.source_sequence_no += 1
+        metrics_tracker.increment("source_ops_count")
+        metrics_tracker.set("source_db_size", len(database.source_db))
+        metrics_tracker.calculate_lag(database.source_sequence_no, sync_state)
+        
+        # Add the row ID to the corrupt filter
+        self.corrupt_filter.add(row_id)
+        
+        # Increment corruption count
+        metrics_tracker.increment("corruption_count")
+        
+        # Track as most recently modified row
+        database.last_modified_row_id = row_id
+        
+        # Create log message
+        logging.info(f"DELETE: id={row_id}, ts={database.source_sequence_no}")
+        logging.info(f"CORRUPT FILTER: Added id={row_id} after delete")
         
         return row_id
     

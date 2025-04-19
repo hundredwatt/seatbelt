@@ -1,0 +1,57 @@
+name: Integer
+random_seed: 42
+description: >
+  This test verifies that validation works correctly with an integer column.
+
+schema:
+  columns:
+    - name: temperature
+      type: integer
+      nullable: true
+
+initial_data:
+  row_count: 4
+  rows:
+    - temperature: 0
+    - temperature: 1
+    - temperature: -1
+    - temperature: null
+
+# Expected result metrics
+expect:
+  - name: Has validation errors
+    type: validation_error
+    expected: true
+
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 4
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 4
+
+  - name: No rows in-flight
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 0
+
+plan:
+  - operation: initialize
+
+  - operation: corrupt_target
+    row:
+      id: 2
+      temperature: NULL
+  - operation: corrupt_target
+    row:
+      id: 3
+      temperature: -2147483648
+
+  - operation: seatbelt_check
+

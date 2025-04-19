@@ -41,7 +41,6 @@ class Simulator:
                 logging.error(f"Error loading configuration: {e}")
                 # Fallback to defaults
                 config = get_default_config()
-                schema = config.get('schema')
                 initial_data = config.get('initial_data')
                 self.seatbelt_interval = config.get('seatbelt_interval', 25)
         else:
@@ -125,9 +124,13 @@ class Simulator:
             self.on_data_changed()
         return result
     
-    def corrupt_by_update(self):
-        """Update a row and mark it as corrupted"""
-        result = self.corruptor.corrupt_by_update(self.database, self.metrics_tracker, self.etl_processor.sync_state)
+    def corrupt_by_update(self, row=None):
+        """Update a row and mark it as corrupted
+        
+        Args:
+            row: Optional dictionary with row values including id to update
+        """
+        result = self.corruptor.corrupt_by_update(self.database, self.metrics_tracker, self.etl_processor.sync_state, row)
         if self.on_data_changed:
             self.on_data_changed()
         return result
@@ -139,9 +142,28 @@ class Simulator:
             self.on_data_changed()
         return result
     
+    def corrupt_by_delete(self):
+        """Delete a row and mark it as corrupted (won't load into target)"""
+        result = self.corruptor.corrupt_by_delete(self.database, self.metrics_tracker, self.etl_processor.sync_state)
+        if self.on_data_changed:
+            self.on_data_changed()
+        return result
+    
     def corrupt_target_score(self):
         """Directly corrupt a column value in the target database"""
         result = self.database.corrupt_target_score(self.metrics_tracker)
+        if self.on_data_changed:
+            self.on_data_changed()
+        return result
+    
+    def corrupt_target_with_row(self, row_id, row_data):
+        """Directly corrupt a target row with specified data
+        
+        Args:
+            row_id: ID of the row to corrupt
+            row_data: Dictionary of column values to set in the target row
+        """
+        result = self.database.corrupt_target_with_row(self.metrics_tracker, row_id, row_data)
         if self.on_data_changed:
             self.on_data_changed()
         return result
@@ -354,8 +376,22 @@ class Simulator:
                 plan.append(lambda: self.corrupt_by_insert())
             elif operation == 'corrupt_by_update':
                 plan.append(lambda: self.corrupt_by_update())
+            elif operation == 'corrupt_by_delete':
+                plan.append(lambda: self.corrupt_by_delete())
             elif operation == 'corrupt_target':
-                plan.append(lambda: self.corrupt_target_score())
+                # Check if a specific row is provided for corruption
+                if 'row' in step_config:
+                    row_data = step_config['row'].copy()
+                    # Extract row_id if specified in the row data
+                    row_id = row_data.get('id')
+                    if row_id is not None:
+                        plan.append(lambda id=row_id, data=row_data: self.corrupt_target_with_row(id, data))
+                    else:
+                        logging.warning(f"corrupt_target operation requires an 'id' field in the row: {step_config}")
+                        plan.append(lambda: self.corrupt_target_score())
+                else:
+                    # Fall back to random corruption
+                    plan.append(lambda: self.corrupt_target_score())
             elif operation == 'toggle_null_corruption':
                 column = step_config.get('column')
                 plan.append(lambda col=column: self.toggle_null_corruption(col))
