@@ -43,6 +43,18 @@ class ValidationEngine:
                 # Convert source row and values to target row and values
                 target_row = source_row.copy()
                 
+                # Apply transformations based on target column types
+                for column in database.schema.columns:
+                    if column.name in target_row and target_row[column.name] is not None:
+                        if column.target_type:
+                            # Apply column type transformation
+                            if column.target_type.value == "float32" and isinstance(target_row[column.name], (int, float)):
+                                target_row[column.name] = f"{float(target_row[column.name]):.7g}"
+                            elif column.target_type.value == "integer32" and isinstance(target_row[column.name], int):
+                                # Check if value is within int32 bounds
+                                if not (-2147483648 <= target_row[column.name] <= 2147483647):
+                                    target_row[column.name] = None
+                        
                 source_hash = hashlib.sha256(json.dumps(source_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest()
                 target_hash = hashlib.sha256(json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest() 
                
@@ -57,10 +69,24 @@ class ValidationEngine:
         }
         
         # 3. Read the target signatures
-        target_db_signatures = {
-            k: hashlib.sha256(json.dumps(v, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest() 
-            for k, v in database.target_db.items()
-        }
+        target_db_signatures = {}
+        for k, v in database.target_db.items():
+            # Create a copy of target row to properly handle transformations
+            target_row = v.copy()
+            
+            # Apply any final type-specific formatting to ensure consistent signatures
+            for column in database.schema.columns:
+                if column.name in target_row and target_row[column.name] is not None:
+                    if column.target_type and column.target_type.value == "float32":
+                        # Ensure consistent float32 formatting if it's not already a string
+                        if not isinstance(target_row[column.name], str):
+                            target_row[column.name] = f"{float(target_row[column.name]):.7g}"
+                    elif column.target_type and column.target_type.value == "integer32":
+                        # Ensure int32 bounds are respected in validation
+                        if isinstance(target_row[column.name], int) and not (-2147483648 <= target_row[column.name] <= 2147483647):
+                            target_row[column.name] = None
+            
+            target_db_signatures[k] = hashlib.sha256(json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest()
         
         # 4. Update the shadow (seatbelt)
         ids = set(source_db_signatures.keys()) | \
@@ -113,6 +139,15 @@ class ValidationEngine:
                     if column.nullable and column.name in source_row and column.name in target_row:
                         source_is_null = source_row[column.name] is None
                         target_is_null = target_row[column.name] is None
+                        
+                        # Special case for INTEGER32: out-of-bounds INTEGER values should be NULL in target
+                        if column.target_type and column.target_type.value == "integer32" and not source_is_null:
+                            source_value = source_row[column.name]
+                            if not (-2147483648 <= source_value <= 2147483647):
+                                # This should be NULL in target, so don't count it as a mismatch
+                                if target_is_null:
+                                    continue
+                                
                         if source_is_null != target_is_null:
                             null_mismatch = True
                             break

@@ -55,12 +55,22 @@ class TestRunner:
             except ValueError:
                 # Default to string if invalid type
                 column_type = ColumnType.STRING
+            
+            # Handle target_type conversion to enum
+            target_type = None
+            if 'target_type' in column_dict:
+                target_type_str = column_dict.get('target_type')
+                try:
+                    target_type = ColumnType(target_type_str)
+                except ValueError:
+                    # Log warning but continue with None target_type
+                    logging.warning(f"Invalid target_type '{target_type_str}' for column '{column_dict.get('name')}', using None")
                 
             column = ColumnDefinition(
                 name=column_dict.get('name'),
                 type=column_type,
                 nullable=column_dict.get('nullable', False),
-                target_type=column_dict.get('target_type', None)
+                target_type=target_type
             )
             schema.add_column(column)
             

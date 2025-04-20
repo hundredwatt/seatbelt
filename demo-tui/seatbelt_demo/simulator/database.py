@@ -11,7 +11,9 @@ from enum import Enum
 class ColumnType(Enum):
     """Supported data column types"""
     INTEGER = "integer"
+    INTEGER32 = "integer32"
     FLOAT = "float"
+    FLOAT32 = "float32"
     DECIMAL = "decimal"
     STRING = "string"
     BOOLEAN = "boolean"
@@ -206,8 +208,14 @@ class Database:
         """Generate a default value for a column type"""
         if column_type == ColumnType.INTEGER:
             return random.randint(1, 1000)
+        elif column_type == ColumnType.INTEGER32:
+            # Generate an integer within int32 bounds
+            return random.randint(-2147483648, 2147483647)
         elif column_type == ColumnType.FLOAT:
             return round(random.random() * 100, 2)
+        elif column_type == ColumnType.FLOAT32:
+            # Generate a float and format as float32 string
+            return f"{round(random.random() * 100, 2):.7g}"
         elif column_type == ColumnType.DECIMAL:
             # For DECIMAL(10,2), generate values with exactly 2 decimal places
             return round(random.random() * 100000000, 2)
@@ -228,6 +236,17 @@ class Database:
             # For DECIMAL type, ensure we always format with 2 decimal places
             if column.type == ColumnType.DECIMAL and source_value is not None:
                 return round(float(source_value), 2)
+            # For FLOAT type with implicit float32 in target
+            if column.type == ColumnType.FLOAT and source_value is not None and column.target_type == ColumnType.FLOAT32:
+                return f"{float(source_value):.7g}"
+            # For INTEGER type with implicit integer32 in target
+            if column.type == ColumnType.INTEGER and source_value is not None and column.target_type == ColumnType.INTEGER32:
+                # Check if value is within int32 bounds
+                if -2147483648 <= source_value <= 2147483647:
+                    return source_value
+                else:
+                    # Return NULL for out-of-bounds values
+                    return None
             return source_value
             
         # Transform based on target type
@@ -237,12 +256,30 @@ class Database:
                 return int(source_value)
             except (ValueError, TypeError):
                 return 0
+        elif column.target_type == ColumnType.INTEGER32:
+            # Convert to int32 with bounds checking
+            try:
+                int_value = int(source_value)
+                # Check if value is within int32 bounds
+                if -2147483648 <= int_value <= 2147483647:
+                    return int_value
+                else:
+                    # Return NULL for out-of-bounds values
+                    return None
+            except (ValueError, TypeError):
+                return None
         elif column.target_type == ColumnType.FLOAT:
             # Convert to float
             try:
                 return float(source_value)
             except (ValueError, TypeError):
                 return 0.0
+        elif column.target_type == ColumnType.FLOAT32:
+            # Convert to float32 (using string representation with 7 significant digits)
+            try:
+                return f"{float(source_value):.7g}"
+            except (ValueError, TypeError):
+                return "0.0"
         elif column.target_type == ColumnType.DECIMAL:
             # Convert to decimal (formatted as float with fixed precision)
             try:

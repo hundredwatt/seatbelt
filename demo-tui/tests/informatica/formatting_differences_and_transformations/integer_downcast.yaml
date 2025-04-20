@@ -1,0 +1,75 @@
+name: Integer Downcast Test (Integer64 to Integer32)
+random_seed: 42
+description: |
+  This test checks the behavior of downcasting integer64 values to integer32. 
+  Out of bounds integer64 values are converted to NULL in the target.
+
+schema:
+  columns:
+    - name: measurement
+      type: integer
+      nullable: true
+      target_type: integer32
+
+initial_data:
+  row_count: 0
+  rows:
+    - measurement: null
+    - measurement: 2147483647  # MAX_INT32
+    - measurement: -2147483648  # MIN_INT32
+    - measurement: 9223372036854775807  # MAX_INT64 - should become NULL in target
+    - measurement: -9223372036854775808  # MIN_INT64 - should become NULL in target
+    - measurement: 0  # Valid value
+
+plan:
+  - operation: initialize
+  - operation: expect
+    name: 6 valid rows after initialization
+    type: metric
+    metric: valid_count
+    comparison: equal
+    value: 6
+
+  # Check target values
+  - operation: expect
+    name: OOB values converted to NULL
+    type: validation_error
+    expected: false
+
+  # Corrupt the database to introduce errors
+  - operation: corrupt_target
+    row:
+      id: 3
+      measurement: null  # A NULL value when it should be 2147483647
+  - operation: corrupt_target
+    row:
+      id: 4
+      measurement: 2147483647  # A value when it should be NULL
+
+  - operation: seatbelt_check
+
+  # Expect validation errors after corruption
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: true
+  # Expect 2 discrepant rows
+  - operation: expect
+    name: 2 discrepant rows
+    type: metric
+    metric: error_count
+    comparison: equal
+    value: 2
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 6
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 6 
