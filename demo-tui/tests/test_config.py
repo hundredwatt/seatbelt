@@ -20,6 +20,30 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+# Helper function to detect if terminal supports colors
+def supports_color():
+    """
+    Returns True if the running system's terminal supports color,
+    and False otherwise.
+    """
+    # Check if the NO_COLOR environment variable is set
+    if os.environ.get('NO_COLOR', False):
+        return False
+        
+    # Check if output is a tty
+    if not hasattr(sys.stdout, 'isatty') or not sys.stdout.isatty():
+        return False
+        
+    # Check platform
+    plat = sys.platform
+    supported_platform = plat != 'Pocket PC' and (plat != 'win32' or 'ANSICON' in os.environ)
+    
+    # On Windows, check if TERM environment variable is set
+    if plat == 'win32' and not supported_platform:
+        return os.environ.get('TERM', '') == 'ANSI'
+        
+    return supported_platform
+
 class TestResult:
     """Class representing a test result"""
     
@@ -35,12 +59,25 @@ class TestResult:
             output += f" - {self.message}"
         return output
 
+    def colored_str(self):
+        """Return colored string representation of the test result"""
+        if self.passed:
+            result = "\033[92mPASS\033[0m"  # Green
+        else:
+            result = "\033[91mFAIL\033[0m"  # Red
+            
+        output = f"{self.name}: {result}"
+        if self.message and not self.passed:
+            output += f" - {self.message}"
+        return output
+
 
 class TestRunner:
     """Class for running tests based on configuration files"""
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, use_color: bool = True):
         self.verbose = verbose
+        self.use_color = use_color
         self.results = []
     
     def _convert_schema_dict(self, schema_dict: Dict[str, Any]) -> SchemaDefinition:
@@ -321,27 +358,50 @@ class TestRunner:
             return TestResult(full_name, False, f"Unknown expectation type: {expect_type}")
     
     def print_results(self):
-        """Print test results to console"""
+        """Print test results to console with colors and summary at bottom"""
         pass_count = sum(1 for r in self.results if r.passed)
         fail_count = len(self.results) - pass_count
         
-        print(f"\nTest Results: {pass_count} passed, {fail_count} failed")
-        
+        # Print individual test results first
         if fail_count > 0:
             print("\nFailed tests:")
             for result in self.results:
                 if not result.passed:
-                    print(f"  {result}")
-                    
+                    if self.use_color:
+                        print(f"  {result.colored_str()}")
+                    else:
+                        print(f"  {result}")
+                
         if self.verbose or fail_count == 0:
             print("\nAll tests:")
             for result in self.results:
-                print(f"  {result}")
+                if self.use_color:
+                    print(f"  {result.colored_str()}")
+                else:
+                    print(f"  {result}")
+        
+        # Print summary at the bottom
+        print("\n" + "=" * 50)
+        if fail_count == 0:
+            if self.use_color:
+                print(f"\033[92mAll tests passed!\033[0m ({pass_count} tests)")
+            else:
+                print(f"All tests passed! ({pass_count} tests)")
+        else:
+            if self.use_color:
+                print(f"Test Results: \033[92m{pass_count} passed\033[0m, \033[91m{fail_count} failed\033[0m")
+            else:
+                print(f"Test Results: {pass_count} passed, {fail_count} failed")
+        print("=" * 50)
 
 
-def run_tests(test_paths, verbose=False):
+def run_tests(test_paths, verbose=False, use_color=None):
     """Run tests from the specified files or directories"""
-    runner = TestRunner(verbose=verbose)
+    # Auto-detect color support if not explicitly specified
+    if use_color is None:
+        use_color = supports_color()
+        
+    runner = TestRunner(verbose=verbose, use_color=use_color)
     runner.results = []
     
     # Process each path
