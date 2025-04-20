@@ -12,7 +12,7 @@ class ETLProcessor:
             'last_extract_ts': -1,
             'last_load_ts': -1,
         }
-        self.tracing_ids = []
+        self.tracing_ids = [2]
         # Track which columns can have NULL corruptions
         self.null_corruptible_columns: Set[str] = set()
 

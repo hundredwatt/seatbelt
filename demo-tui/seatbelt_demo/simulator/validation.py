@@ -50,6 +50,9 @@ class ValidationEngine:
                             # Apply column type transformation
                             if column.target_type.value == "float32" and isinstance(target_row[column.name], (int, float)):
                                 target_row[column.name] = f"{float(target_row[column.name]):.7g}"
+                            elif column.target_type.value == "decimal" and isinstance(target_row[column.name], int):
+                                # For integer to decimal transformation, convert to float but maintain exact value
+                                target_row[column.name] = float(target_row[column.name])
                             elif column.target_type.value == "integer32" and isinstance(target_row[column.name], int):
                                 # Check if value is within int32 bounds
                                 if not (-2147483648 <= target_row[column.name] <= 2147483647):
@@ -81,6 +84,10 @@ class ValidationEngine:
                         # Ensure consistent float32 formatting if it's not already a string
                         if not isinstance(target_row[column.name], str):
                             target_row[column.name] = f"{float(target_row[column.name]):.7g}"
+                    elif column.target_type and column.target_type.value == "decimal":
+                        # For decimal type, ensure it's a float for consistent signatures
+                        if isinstance(target_row[column.name], int):
+                            target_row[column.name] = float(target_row[column.name])
                     elif column.target_type and column.target_type.value == "integer32":
                         # Ensure int32 bounds are respected in validation
                         if isinstance(target_row[column.name], int) and not (-2147483648 <= target_row[column.name] <= 2147483647):
