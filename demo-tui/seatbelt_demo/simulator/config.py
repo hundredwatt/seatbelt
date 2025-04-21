@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional, Union, Callable
 from dataclasses import asdict
 
 from .database import SchemaDefinition, ColumnDefinition, InitialData, ColumnType
+from .schema_utils import convert_schema_dict, convert_initial_data_dict
 
 class ConfigurationError(Exception):
     """Exception raised for configuration errors."""
@@ -37,68 +38,20 @@ def create_schema_from_config(config: Dict[str, Any]) -> SchemaDefinition:
     if 'schema' not in config:
         return None
     
-    schema_config = config['schema']
-    schema = SchemaDefinition()
-    
-    # Process each column definition
-    for column_config in schema_config.get('columns', []):
-        if 'name' not in column_config:
-            raise ConfigurationError("Column name is required")
-        
-        column_name = column_config['name']
-        
-        # Skip 'id' column - it's added automatically by the Database class
-        if column_name == 'id':
-            continue
-            
-        # Parse column type
-        column_type_str = column_config.get('type', 'string').lower()
-        try:
-            column_type = ColumnType(column_type_str)
-        except ValueError:
-            raise ConfigurationError(f"Invalid column type '{column_type_str}' for column '{column_name}'")
-        
-        # Parse target type if specified
-        target_type = None
-        if 'target_type' in column_config:
-            target_type_str = column_config['target_type'].lower()
-            try:
-                target_type = ColumnType(target_type_str)
-            except ValueError:
-                raise ConfigurationError(
-                    f"Invalid target column type '{target_type_str}' for column '{column_name}'"
-                )
-        
-        # Create column definition
-        column = ColumnDefinition(
-            name=column_name,
-            type=column_type,
-            nullable=column_config.get('nullable', False),
-            target_type=target_type,
-            # Note: custom generators must be set programmatically after loading the config
-            generator=None
-        )
-        
-        schema.add_column(column)
-    
-    return schema
+    try:
+        return convert_schema_dict(config['schema'])
+    except Exception as e:
+        raise ConfigurationError(f"Error creating schema from configuration: {e}")
 
 def create_initial_data_from_config(config: Dict[str, Any]) -> Optional[InitialData]:
     """Create initial data configuration from a configuration dict."""
     if 'initial_data' not in config:
         return None  # Return None if not specified in config
 
-    initial_data_config = config['initial_data']
-    # Default row_count to 0 if not specified when initial_data *is* present
-    row_count = initial_data_config.get('row_count', 0)
-
-    initial_data = InitialData(row_count=row_count)
-
-    # Load explicit rows if provided
-    for row_config in initial_data_config.get('rows', []):
-        initial_data.add_row(row_config)
-
-    return initial_data
+    try:
+        return convert_initial_data_dict(config['initial_data'])
+    except Exception as e:
+        raise ConfigurationError(f"Error creating initial data from configuration: {e}")
 
 def load_simulator_config(file_path: Union[str, Path]) -> Dict[str, Any]:
     """Load the full simulator configuration."""

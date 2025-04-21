@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from seatbelt_demo.simulator import Simulator
 from seatbelt_demo.simulator.database import SchemaDefinition, ColumnDefinition, ColumnType, InitialData
+from seatbelt_demo.simulator.schema_utils import convert_schema_dict, convert_initial_data_dict
 
 # Configure logging
 logging.basicConfig(
@@ -80,51 +81,6 @@ class TestRunner:
         self.use_color = use_color
         self.results = []
     
-    def _convert_schema_dict(self, schema_dict: Dict[str, Any]) -> SchemaDefinition:
-        """Convert a schema dictionary from YAML to a SchemaDefinition object"""
-        schema = SchemaDefinition()
-        
-        # Add columns from the dictionary
-        for column_dict in schema_dict.get('columns', []):
-            column_type_str = column_dict.get('type', 'string')
-            try:
-                column_type = ColumnType(column_type_str)
-            except ValueError:
-                # Default to string if invalid type
-                column_type = ColumnType.STRING
-            
-            # Handle target_type conversion to enum
-            target_type = None
-            if 'target_type' in column_dict:
-                target_type_str = column_dict.get('target_type')
-                try:
-                    target_type = ColumnType(target_type_str)
-                except ValueError:
-                    # Log warning but continue with None target_type
-                    logging.warning(f"Invalid target_type '{target_type_str}' for column '{column_dict.get('name')}', using None")
-                
-            column = ColumnDefinition(
-                name=column_dict.get('name'),
-                type=column_type,
-                nullable=column_dict.get('nullable', False),
-                target_type=target_type
-            )
-            schema.add_column(column)
-            
-        return schema
-    
-    def _convert_initial_data_dict(self, initial_data_dict: Dict[str, Any]) -> InitialData:
-        """Convert an initial_data dictionary from YAML to an InitialData object"""
-        initial_data = InitialData(
-            row_count=initial_data_dict.get('row_count', 0)
-        )
-        
-        # Add rows
-        for row_dict in initial_data_dict.get('rows', []):
-            initial_data.add_row(row_dict)
-            
-        return initial_data
-    
     def run_test_from_file(self, test_file: str) -> List[TestResult]:
         """Run a test from a YAML configuration file"""
         try:
@@ -145,12 +101,12 @@ class TestRunner:
         schema_dict = config.get('schema')
         schema = None
         if schema_dict:
-            schema = self._convert_schema_dict(schema_dict)
+            schema = convert_schema_dict(schema_dict)
             
         initial_data_dict = config.get('initial_data')
         initial_data = None
         if initial_data_dict:
-            initial_data = self._convert_initial_data_dict(initial_data_dict)
+            initial_data = convert_initial_data_dict(initial_data_dict)
             
         simulator = Simulator(
             random_seed=config.get('random_seed', 42), 

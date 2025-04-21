@@ -19,6 +19,7 @@ class ColumnType(Enum):
     BOOLEAN = "boolean"
     DATE = "date"
     DATETIME = "datetime"
+    JSON = "json"  # Add JSON data type support
 
 @dataclass
 class ColumnDefinition:
@@ -227,6 +228,16 @@ class Database:
             return self.fake.date_object()
         elif column_type == ColumnType.DATETIME:
             return self.fake.date_time()
+        elif column_type == ColumnType.JSON:
+            # Generate a simple JSON object or array
+            json_types = [
+                {},  # empty object
+                [],  # empty array
+                {"a": 1, "b": 2},  # simple object
+                [1, 2, 3],  # simple array
+                {"nested": {"x": 1, "y": 2}, "list": [1, 2, 3]}  # nested structure
+            ]
+            return random.choice(json_types)
         else:
             return None
     

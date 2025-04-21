@@ -16,6 +16,7 @@ import os
 from typing import List, Dict, Any, Optional, Set, Tuple, Callable
 
 from ..simulator import Simulator
+from ..simulator.schema_utils import convert_schema_dict, convert_initial_data_dict
 
 # Configure logging to capture messages
 class TUILogHandler(logging.Handler):
@@ -234,14 +235,31 @@ def draw_source_db(stdscr, y, x, height, width, state, sim_state):
     if hasattr(state.simulator.database, 'schema'):
         schema = state.simulator.database.schema
 
+    # Calculate available space for columns
+    # Account for: left margin (2) + ID width (3) + separators + right margin (2)
+    id_col_width = 3
+    separator_width = 3  # " | "
+    margin_width = 4  # left(2) + right(2)
+
+    # Get non-ID columns
+    non_id_columns = []
+    if schema and hasattr(schema, 'columns'):
+        non_id_columns = [col for col in schema.columns if col.name != 'id'][:2]  # Get up to 2 non-ID columns
+
     # Table headers
-    if schema and hasattr(schema, 'columns') and len(schema.columns) > 1:
-        # For custom schemas, show ID and first two non-ID columns
-        columns = [col for col in schema.columns if col.name != 'id'][:2]
-        header = f"ID | {columns[0].name:<18} | {columns[1].name if len(columns) > 1 else ''}"
+    if len(non_id_columns) == 2:
+        # For 3-column schemas (ID + 2 data columns)
+        # Calculate width for the two data columns
+        col1_width = min(18, (width - id_col_width - separator_width * 2 - margin_width) // 2)
+        col2_width = width - id_col_width - separator_width * 2 - margin_width - col1_width
+        header = f"ID | {non_id_columns[0].name:<{col1_width}} | {non_id_columns[1].name}"
+    elif len(non_id_columns) == 1:
+        # For 2-column schemas (ID + 1 data column)
+        data_col_name = non_id_columns[0].name
+        header = f"ID | {data_col_name}"
     else:
         # Default schema
-        header = "ID | Name                 | Score"
+        header = "ID | data"
     
     add_str_safe(stdscr, y + 1, x + 2, header)
     add_str_safe(stdscr, y + 2, x + 2, "-" * (width - 4))
@@ -257,39 +275,71 @@ def draw_source_db(stdscr, y, x, height, width, state, sim_state):
             break
 
         # Format row based on schema
-        if schema and hasattr(schema, 'columns') and len(schema.columns) > 1:
-            # For custom schemas, show ID and first two non-ID columns
-            columns = [col for col in schema.columns if col.name != 'id'][:2]
-            col1 = columns[0].name
-            col2 = columns[1].name if len(columns) > 1 else None
+        if len(non_id_columns) == 2:
+            # For 3-column schemas (ID + 2 data columns)
+            col1 = non_id_columns[0].name
+            col2 = non_id_columns[1].name
             
-            # Format value for first column
+            # Format value for first data column
             val1 = row.get(col1)
             if val1 is None:
                 val1_display = "NULL"
             elif isinstance(val1, (float, int)):
-                val1_display = f"{val1:<5}"
+                val1_display = f"{val1}"
             else:
-                val1_display = str(val1)[:18]
-            
-            # Format value for second column if present
-            if col2:
-                val2 = row.get(col2)
-                if val2 is None:
-                    val2_display = "NULL"
-                elif isinstance(val2, (float, int)):
-                    val2_display = f"{val2:<5}"
+                val1_str = str(val1)
+                if len(val1_str) > col1_width:
+                    val1_display = val1_str[:col1_width]
                 else:
-                    val2_display = str(val2)[:18]
-                
-                row_str = f"{row['id']:<3} | {val1_display:<18} | {val2_display}"
+                    val1_display = val1_str
+            
+            # Format value for second data column
+            val2 = row.get(col2)
+            if val2 is None:
+                val2_display = "NULL"
+            elif isinstance(val2, (float, int)):
+                val2_display = f"{val2}"
             else:
-                row_str = f"{row['id']:<3} | {val1_display:<18} |"
+                val2_str = str(val2)
+                if len(val2_str) > col2_width:
+                    val2_display = val2_str[:col2_width]
+                else:
+                    val2_display = val2_str
+            
+            row_str = f"{row['id']:<3} | {val1_display:<{col1_width}} | {val2_display}"
+        elif len(non_id_columns) == 1:
+            # For 2-column schemas (ID + 1 data column)
+            col1 = non_id_columns[0].name
+            
+            # Format value for data column with all available space
+            available_data_width = width - id_col_width - separator_width - margin_width
+            val1 = row.get(col1)
+            if val1 is None:
+                val1_display = "NULL"
+            elif isinstance(val1, (float, int)):
+                val1_display = f"{val1}"
+            else:
+                val1_str = str(val1)
+                if len(val1_str) > available_data_width:
+                    val1_display = val1_str[:available_data_width]
+                else:
+                    val1_display = val1_str
+            
+            row_str = f"{row['id']:<3} | {val1_display}"
         else:
-            # Default schema (name and score)
-            # Format score as NULL or a numeric value
-            score_display = "NULL" if row.get('score') is None else f"{row.get('score'):<5.2f}"
-            row_str = f"{row['id']:<3} | {row.get('name', '')[:18]:<18} | {score_display}"
+            # Default schema
+            data_value = row.get('data')
+            available_data_width = width - id_col_width - separator_width - margin_width
+            if data_value is None:
+                data_display = "NULL"
+            else:
+                data_str = str(data_value)
+                if len(data_str) > available_data_width:
+                    data_display = data_str[:available_data_width]
+                else:
+                    data_display = data_str
+            
+            row_str = f"{row['id']:<3} | {data_display}"
 
         # Only highlight the most recently modified row with green
         if row['id'] == state.last_modified_row_id:
@@ -306,14 +356,31 @@ def draw_target_db(stdscr, y, x, height, width, state, sim_state):
     if hasattr(state.simulator.database, 'schema'):
         schema = state.simulator.database.schema
 
+    # Calculate available space for columns
+    # Account for: left margin (2) + ID width (3) + separators + right margin (2)
+    id_col_width = 3
+    separator_width = 3  # " | "
+    margin_width = 4  # left(2) + right(2)
+
+    # Get non-ID columns
+    non_id_columns = []
+    if schema and hasattr(schema, 'columns'):
+        non_id_columns = [col for col in schema.columns if col.name != 'id'][:2]  # Get up to 2 non-ID columns
+
     # Table headers
-    if schema and hasattr(schema, 'columns') and len(schema.columns) > 1:
-        # For custom schemas, show ID and first two non-ID columns
-        columns = [col for col in schema.columns if col.name != 'id'][:2]
-        header = f"ID | {columns[0].name:<18} | {columns[1].name if len(columns) > 1 else ''}"
+    if len(non_id_columns) == 2:
+        # For 3-column schemas (ID + 2 data columns)
+        # Calculate width for the two data columns
+        col1_width = min(18, (width - id_col_width - separator_width * 2 - margin_width) // 2)
+        col2_width = width - id_col_width - separator_width * 2 - margin_width - col1_width
+        header = f"ID | {non_id_columns[0].name:<{col1_width}} | {non_id_columns[1].name}"
+    elif len(non_id_columns) == 1:
+        # For 2-column schemas (ID + 1 data column)
+        data_col_name = non_id_columns[0].name
+        header = f"ID | {data_col_name}"
     else:
         # Default schema
-        header = "ID | Name                 | Score"
+        header = "ID | data"
     
     add_str_safe(stdscr, y + 1, x + 2, header)
     add_str_safe(stdscr, y + 2, x + 2, "-" * (width - 4))
@@ -329,39 +396,71 @@ def draw_target_db(stdscr, y, x, height, width, state, sim_state):
             break
 
         # Format row based on schema
-        if schema and hasattr(schema, 'columns') and len(schema.columns) > 1:
-            # For custom schemas, show ID and first two non-ID columns
-            columns = [col for col in schema.columns if col.name != 'id'][:2]
-            col1 = columns[0].name
-            col2 = columns[1].name if len(columns) > 1 else None
+        if len(non_id_columns) == 2:
+            # For 3-column schemas (ID + 2 data columns)
+            col1 = non_id_columns[0].name
+            col2 = non_id_columns[1].name
             
-            # Format value for first column
+            # Format value for first data column
             val1 = row.get(col1)
             if val1 is None:
                 val1_display = "NULL"
             elif isinstance(val1, (float, int)):
-                val1_display = f"{val1:<5}"
+                val1_display = f"{val1}"
             else:
-                val1_display = str(val1)[:18]
-            
-            # Format value for second column if present
-            if col2:
-                val2 = row.get(col2)
-                if val2 is None:
-                    val2_display = "NULL"
-                elif isinstance(val2, (float, int)):
-                    val2_display = f"{val2:<5}"
+                val1_str = str(val1)
+                if len(val1_str) > col1_width:
+                    val1_display = val1_str[:col1_width]
                 else:
-                    val2_display = str(val2)[:18]
-                
-                row_str = f"{row['id']:<3} | {val1_display:<18} | {val2_display}"
+                    val1_display = val1_str
+            
+            # Format value for second data column
+            val2 = row.get(col2)
+            if val2 is None:
+                val2_display = "NULL"
+            elif isinstance(val2, (float, int)):
+                val2_display = f"{val2}"
             else:
-                row_str = f"{row['id']:<3} | {val1_display:<18} |"
+                val2_str = str(val2)
+                if len(val2_str) > col2_width:
+                    val2_display = val2_str[:col2_width]
+                else:
+                    val2_display = val2_str
+            
+            row_str = f"{row['id']:<3} | {val1_display:<{col1_width}} | {val2_display}"
+        elif len(non_id_columns) == 1:
+            # For 2-column schemas (ID + 1 data column)
+            col1 = non_id_columns[0].name
+            
+            # Format value for data column with all available space
+            available_data_width = width - id_col_width - separator_width - margin_width
+            val1 = row.get(col1)
+            if val1 is None:
+                val1_display = "NULL"
+            elif isinstance(val1, (float, int)):
+                val1_display = f"{val1}"
+            else:
+                val1_str = str(val1)
+                if len(val1_str) > available_data_width:
+                    val1_display = val1_str[:available_data_width]
+                else:
+                    val1_display = val1_str
+            
+            row_str = f"{row['id']:<3} | {val1_display}"
         else:
-            # Default schema (name and score)
-            # Format score as NULL or a numeric value
-            score_display = "NULL" if row.get('score') is None else f"{row.get('score'):<5.2f}"
-            row_str = f"{row['id']:<3} | {row.get('name', '')[:18]:<18} | {score_display}"
+            # Default schema
+            data_value = row.get('data')
+            available_data_width = width - id_col_width - separator_width - margin_width
+            if data_value is None:
+                data_display = "NULL"
+            else:
+                data_str = str(data_value)
+                if len(data_str) > available_data_width:
+                    data_display = data_str[:available_data_width]
+                else:
+                    data_display = data_str
+            
+            row_str = f"{row['id']:<3} | {data_display}"
 
         # Highlight recently loaded rows in yellow (for 5 seconds after load)
         current_time = time.time()

@@ -1,0 +1,93 @@
+name: JSON Data Type Test
+random_seed: 42
+
+schema:
+  columns:
+    - name: data
+      type: json
+      nullable: true
+
+initial_data:
+  row_count: 7
+  rows:
+    - data: null
+    - data: []
+    - data: {}
+    - data: {"a": 1, "b": 2, "c": 3}
+    - data: ["a", 1, "b", 2, "c", 3]
+    - data: {"nested": {"x": 1, "y": 2}, "list": [1, 2, 3]}
+    - data: {"a": 1, "b": 2, "c": 3}
+
+plan:
+  - operation: initialize
+
+  # Valid updates
+  - operation: update
+    row:
+      id: 1
+      data: {"a": 1, "b": 2, "c": 3}
+  - operation: update
+    row:
+      id: 2
+      data: {"nested": {"x": 1, "y": 2}, "list": [1, 2, 3]}
+  - operation: update
+    row:
+      id: 3
+      data: null
+  - operation: update
+    row:
+      id: 4
+      data: []
+  - operation: update
+    row:
+      id: 5
+      data: {}
+  - operation: update
+    row:
+      id: 6
+      data: ["a", 1, "b", 2, "c", 3]
+  - operation: corrupt_target
+    row:
+      id: 7
+      data: {"c": 3, "b": 2, "a": 1}  # scrambled keys (not a corruption)
+
+  # Run seatbelt validation check to detect the in-flight rows
+  - operation: seatbelt_check
+  - operation: expect
+    name: 6 in-flight rows
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 6
+
+  # Sync the data to the target database
+  - operation: extract
+  - operation: load
+
+  # Run seatbelt validation check again
+  - operation: seatbelt_check
+  # Expect no validation errors
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: false
+  # Expect no rows in-flight
+  - operation: expect
+    name: No rows in-flight
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 0
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 7
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 7 
