@@ -3,7 +3,8 @@
 import logging
 from typing import Dict, Any, Optional
 
-from .database import SchemaDefinition, ColumnDefinition, ColumnType, InitialData
+from .column_types import ColumnType
+from .database import SchemaDefinition, ColumnDefinition, InitialData
 
 def convert_schema_dict(schema_dict: Dict[str, Any]) -> SchemaDefinition:
     """Convert a schema dictionary from YAML/JSON to a SchemaDefinition object

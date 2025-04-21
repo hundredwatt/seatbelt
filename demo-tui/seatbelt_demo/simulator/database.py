@@ -6,20 +6,8 @@ import logging
 from datetime import datetime, date
 from typing import Dict, List, Any, Optional, Tuple, Union, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-
-class ColumnType(Enum):
-    """Supported data column types"""
-    INTEGER = "integer"
-    INTEGER32 = "integer32"
-    FLOAT = "float"
-    FLOAT32 = "float32"
-    DECIMAL = "decimal"
-    STRING = "string"
-    BOOLEAN = "boolean"
-    DATE = "date"
-    DATETIME = "datetime"
-    JSON = "json"  # Add JSON data type support
+from .column_types import ColumnType
+from .transformations import Transformations
 
 @dataclass
 class ColumnDefinition:
@@ -240,81 +228,6 @@ class Database:
             return random.choice(json_types)
         else:
             return None
-    
-    def _transform_for_target(self, source_value: Any, column: ColumnDefinition) -> Any:
-        """Transform a value from source type to target type if needed"""
-        if source_value is None or not column.target_type or column.type == column.target_type:
-            # For DECIMAL type, ensure we always format with 2 decimal places
-            if column.type == ColumnType.DECIMAL and source_value is not None:
-                return round(float(source_value), 2)
-            # For FLOAT type with implicit float32 in target
-            if column.type == ColumnType.FLOAT and source_value is not None and column.target_type == ColumnType.FLOAT32:
-                return f"{float(source_value):.7g}"
-            # For INTEGER type with implicit integer32 in target
-            if column.type == ColumnType.INTEGER and source_value is not None and column.target_type == ColumnType.INTEGER32:
-                # Check if value is within int32 bounds
-                if -2147483648 <= source_value <= 2147483647:
-                    return source_value
-                else:
-                    # Return NULL for out-of-bounds values
-                    return None
-            return source_value
-            
-        # Transform based on target type
-        if column.target_type == ColumnType.INTEGER:
-            # Convert to integer
-            try:
-                return int(source_value)
-            except (ValueError, TypeError):
-                return 0
-        elif column.target_type == ColumnType.INTEGER32:
-            # Convert to int32 with bounds checking
-            try:
-                int_value = int(source_value)
-                # Check if value is within int32 bounds
-                if -2147483648 <= int_value <= 2147483647:
-                    return int_value
-                else:
-                    # Return NULL for out-of-bounds values
-                    return None
-            except (ValueError, TypeError):
-                return None
-        elif column.target_type == ColumnType.FLOAT:
-            # Convert to float
-            try:
-                return float(source_value)
-            except (ValueError, TypeError):
-                return 0.0
-        elif column.target_type == ColumnType.FLOAT32:
-            # Convert to float32 (using string representation with 7 significant digits)
-            try:
-                return f"{float(source_value):.7g}"
-            except (ValueError, TypeError):
-                return "0.0"
-        elif column.target_type == ColumnType.DECIMAL:
-            # Convert to decimal (formatted as float with fixed precision)
-            try:
-                return round(float(source_value), 2)
-            except (ValueError, TypeError):
-                return 0.00
-        elif column.target_type == ColumnType.STRING:
-            # Convert to string
-            return str(source_value)
-        elif column.target_type == ColumnType.BOOLEAN:
-            # Convert to boolean
-            return bool(source_value)
-        elif column.target_type == ColumnType.DATE:
-            # Convert to date
-            if isinstance(source_value, datetime):
-                return source_value.date()
-            return source_value
-        elif column.target_type == ColumnType.DATETIME:
-            # Convert to datetime
-            if isinstance(source_value, date) and not isinstance(source_value, datetime):
-                return datetime.combine(source_value, datetime.min.time())
-            return source_value
-        else:
-            return source_value
     
     def insert_row(self, metrics_tracker, sync_state, custom_values=None):
         """Insert a new row into the source database with optional custom values"""

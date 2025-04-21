@@ -64,7 +64,8 @@ seatbelt-tui --config seatbelt_demo/configs/customer_data_example.yaml
 
 ```python
 from seatbelt_demo.simulator import Simulator
-from seatbelt_demo.simulator.database import SchemaDefinition, ColumnDefinition, ColumnType, InitialData
+from seatbelt_demo.simulator.column_types import ColumnType
+from seatbelt_demo.simulator.database import SchemaDefinition, ColumnDefinition, InitialData
 
 # Default schema (name and score columns)
 simulator = Simulator()

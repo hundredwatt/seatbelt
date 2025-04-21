@@ -2,6 +2,7 @@
 
 import logging
 from typing import Dict, List, Any, Optional, Set
+from .transformations import Transformations
 
 class ETLProcessor:
     """Class responsible for ETL (Extract-Transform-Load) operations"""
@@ -39,6 +40,15 @@ class ETLProcessor:
                 logging.info(f"[TRACE] EXTRACT: id={row['id']}, ts={row['ts']}, deleted={row['deleted']}")
 
         return len(incremental)
+
+    def transform_for_target(self, source_value: Any, column) -> Any:
+        """Transform a value from source type to target type if needed"""
+        # Convert database ColumnType to transformations ColumnType
+        return Transformations.transform_source_to_target(
+            source_value, 
+            column.type, 
+            column.target_type
+        )
 
     def load(self, database, corruptor, metrics_tracker):
         """Load data into target database"""
@@ -101,7 +111,7 @@ class ETLProcessor:
                         logging.debug(f"NULL CORRUPTED: id={row_id}, column={col_name} (NULL Mismap)")
                     elif column.target_type and column.target_type != column.type:
                         # Apply type transformation if the column has a target type different from source
-                        target_row[col_name] = database._transform_for_target(source_value, column)
+                        target_row[col_name] = self.transform_for_target(source_value, column)
 
                 database.target_db[row_id] = target_row
 

@@ -6,11 +6,12 @@ from typing import Callable, List, Optional, Dict, Any, Union
 from pathlib import Path
 
 from .metrics import MetricsTracker
-from .database import Database, SchemaDefinition, InitialData, ColumnDefinition, ColumnType
+from .database import Database, SchemaDefinition, InitialData, ColumnDefinition
 from .corruptor import Corruptor
 from .etl import ETLProcessor
 from .validation import ValidationEngine
 from .config import load_simulator_config, get_default_config, ConfigurationError
+from .column_types import ColumnType
 
 class Simulator:
     """Main class for orchestrating data simulation and validation"""

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Callable
 from dataclasses import asdict
 
-from .database import SchemaDefinition, ColumnDefinition, InitialData, ColumnType
+from .column_types import ColumnType
+from .database import SchemaDefinition, ColumnDefinition, InitialData
 from .schema_utils import convert_schema_dict, convert_initial_data_dict
 
 class ConfigurationError(Exception):

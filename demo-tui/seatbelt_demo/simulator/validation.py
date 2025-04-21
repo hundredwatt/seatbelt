@@ -11,6 +11,7 @@ from ..validation.logic import (
     verify_row_integrity_from_incremental_checksums,
     check_for_validation_error
 )
+from .transformations import Transformations
 
 # Custom JSON encoder to handle date and datetime objects
 class CustomJSONEncoder(json.JSONEncoder):
@@ -46,17 +47,12 @@ class ValidationEngine:
                 # Apply transformations based on target column types
                 for column in database.schema.columns:
                     if column.name in target_row and target_row[column.name] is not None:
-                        if column.target_type:
-                            # Apply column type transformation
-                            if column.target_type.value == "float32" and isinstance(target_row[column.name], (int, float)):
-                                target_row[column.name] = f"{float(target_row[column.name]):.7g}"
-                            elif column.target_type.value == "decimal" and isinstance(target_row[column.name], int):
-                                # For integer to decimal transformation, convert to float but maintain exact value
-                                target_row[column.name] = float(target_row[column.name])
-                            elif column.target_type.value == "integer32" and isinstance(target_row[column.name], int):
-                                # Check if value is within int32 bounds
-                                if not (-2147483648 <= target_row[column.name] <= 2147483647):
-                                    target_row[column.name] = None
+                        # Apply column type transformation using Transformations class
+                        target_row[column.name] = Transformations.transform_source_to_target(
+                            target_row[column.name], 
+                            column.type, 
+                            column.target_type
+                        )
                         
                 source_hash = hashlib.sha256(json.dumps(source_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest()
                 target_hash = hashlib.sha256(json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest() 
@@ -80,18 +76,11 @@ class ValidationEngine:
             # Apply any final type-specific formatting to ensure consistent signatures
             for column in database.schema.columns:
                 if column.name in target_row and target_row[column.name] is not None:
-                    if column.target_type and column.target_type.value == "float32":
-                        # Ensure consistent float32 formatting if it's not already a string
-                        if not isinstance(target_row[column.name], str):
-                            target_row[column.name] = f"{float(target_row[column.name]):.7g}"
-                    elif column.target_type and column.target_type.value == "decimal":
-                        # For decimal type, ensure it's a float for consistent signatures
-                        if isinstance(target_row[column.name], int):
-                            target_row[column.name] = float(target_row[column.name])
-                    elif column.target_type and column.target_type.value == "integer32":
-                        # Ensure int32 bounds are respected in validation
-                        if isinstance(target_row[column.name], int) and not (-2147483648 <= target_row[column.name] <= 2147483647):
-                            target_row[column.name] = None
+                    # Use the format_target_for_validation method from Transformations
+                    target_row[column.name] = Transformations.format_target_for_validation(
+                        target_row[column.name], 
+                        column.target_type
+                    )
             
             target_db_signatures[k] = hashlib.sha256(json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest()
         
