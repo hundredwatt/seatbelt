@@ -17,23 +17,7 @@ from .column_types import ColumnType
 from .config import TRACING_IDS
 
 def format_target_for_validation(target_value: Any, target_type: Optional[ColumnType] = None) -> Any:
-    """Format target value for validation to ensure consistent signatures"""
-    if target_value is None:
-        return None
-        
-    if target_type == ColumnType.FLOAT32:
-        # Ensure consistent float32 formatting if it's not already a string
-        if not isinstance(target_value, str):
-            return f"{float(target_value):.7g}"
-    elif target_type == ColumnType.DECIMAL:
-        # For decimal type, ensure it's a float for consistent signatures
-        if isinstance(target_value, int):
-            return float(target_value)
-    elif target_type == ColumnType.INTEGER32:
-        # Ensure int32 bounds are respected in validation
-        if isinstance(target_value, int) and not (-2147483648 <= target_value <= 2147483647):
-            return None
-            
+    # NOOP currently since our hash functions already sort JSON keys
     return target_value
 
 # Custom JSON encoder to handle date and datetime objects
@@ -70,12 +54,7 @@ class ValidationEngine:
             # Convert source row and values to target row and values
             target_row = source_row.copy()
             
-            # Remove columns that shouldn't be synced to target
-            for column in database.schema.iter_target_columns():
-                # We will build the row later; this loop ensures we remove unwanted ones first
-                pass  # iter_target_columns yields only allowed columns, so no deletion here
-
-            # However, we still need to ensure fields that should NOT sync are removed
+            # Ensure fields that should NOT sync are removed
             for column in database.schema.columns:
                 if (not column.sync_to_target and not column.target_only) and column.name in target_row:
                     del target_row[column.name]
@@ -96,7 +75,7 @@ class ValidationEngine:
                             
                         # Apply the operation using the Transformations class
                         computed_value = Transformations.apply_computed_operation(
-                            op_type, source_values
+                            op_type, source_values, arguments, column.target_type or column.type
                         )
                         target_row[column.name] = computed_value
                     continue

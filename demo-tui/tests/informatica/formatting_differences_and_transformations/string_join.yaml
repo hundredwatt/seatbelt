@@ -1,0 +1,108 @@
+name: String Join Transformation
+random_seed: 42
+description: |
+  This test checks the behavior of a join transformation where source columns (first_name, last_name)
+  are combined into a single target column (full_name) using the JOIN operation.
+  The source columns are not synced individually to the target.
+
+schema:
+  columns:
+    - name: first_name
+      type: integer
+      nullable: false
+      sync_to_target: false
+    - name: last_name
+      type: integer
+      nullable: false
+      sync_to_target: false
+    - name: full_name
+      type: string
+      nullable: false
+      target_only: true
+      computed_from:
+        operation: JOIN
+        arguments: [first_name, last_name]
+
+initial_data:
+  row_count: 4
+  rows:
+    - first_name: John
+      last_name: Doe
+    - first_name: Jane
+      last_name: Smith
+    - first_name: Jim
+      last_name: Beam
+    - first_name: Jill
+      last_name: Bar
+
+
+plan:
+  - operation: initialize
+  - operation: expect
+    name: 4 valid row after initialization
+    type: metric
+    metric: valid_count
+    comparison: equal
+    value: 4
+
+  # Test corrupting the target with incorrect sum
+  - operation: corrupt_target
+    row:
+      id: 3
+      full_name: Evil Knevel
+  - operation: corrupt_target
+    row:
+      id: 4
+      full_name: Maleficent
+    
+  # Testing corruption after insert
+  - operation: insert
+    row:
+      id: 5
+      first_name: Don
+      last_name: Quixote
+  - operation: extract
+  - operation: load
+  - operation: corrupt_target
+    row:
+      id: 5
+      full_name: Darth Vader
+  
+  - operation: seatbelt_check
+  - operation: expect
+    name: 1 in-flight row
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 1
+    
+  - operation: extract
+  - operation: load
+  - operation: seatbelt_check
+
+  # Expect validation errors after corruption
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: true
+  
+  # Expect 3 discrepant rows
+  - operation: expect
+    name: 3 discrepant rows
+    type: metric
+    metric: error_count
+    comparison: equal
+    value: 3
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 5
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 5

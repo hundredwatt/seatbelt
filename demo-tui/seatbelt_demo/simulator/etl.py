@@ -101,7 +101,7 @@ class ETLProcessor:
                         if operation and source_columns:
                             source_values = [row.get(src_col) for src_col in source_columns]
                             computed_value = Transformations.apply_computed_operation(
-                                operation, source_values
+                                operation, source_values, arguments, column.target_type or column.type
                             )
                             target_row[col_name] = computed_value
                         # Whether or not computed value generated, proceed to next column

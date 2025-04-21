@@ -85,7 +85,7 @@ class Transformations:
             return source_value
             
     @staticmethod
-    def apply_computed_operation(operation: str, values: List[Any]) -> Any:
+    def apply_computed_operation(operation: str, values: List[Any], arguments: List[Any], target_type: ColumnType) -> Any:
         """Apply a computed operation on a list of values
         
         Args:
@@ -113,6 +113,15 @@ class Transformations:
             return max(valid_values)
         elif operation.upper() == 'COUNT':
             return len(valid_values)
+        elif operation.upper() == 'JOIN':
+            return ' '.join(valid_values)
+        elif operation.upper() == 'EXTRACT_JSON':
+            json_data = values[0]
+            field = arguments[1]
+            try:
+                data = json.loads(json_data) if isinstance(json_data, str) else json_data
+                return data[field]
+            except (json.JSONDecodeError, TypeError):
+                return None
         else:
-            # Default to returning the first value
-            return valid_values[0] if valid_values else None 
+            raise ValueError(f"Invalid operation: {operation}")
