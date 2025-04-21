@@ -13,7 +13,7 @@ class ETLProcessor:
             'last_extract_ts': -1,
             'last_load_ts': -1,
         }
-        self.tracing_ids = []
+        self.tracing_ids = [1]
         # Track which columns can have NULL corruptions
         self.null_corruptible_columns: Set[str] = set()
 
@@ -86,20 +86,44 @@ class ETLProcessor:
             else:
                 deletes.discard(row_id)
                 # Create a copy without the 'deleted' field for target
-                target_row = row.copy()
-                if 'deleted' in target_row:
-                    target_row.pop('deleted')
-                if 'ts' in target_row:
-                    target_row.pop('ts')
-
-                # Apply type transformations and handle NULL corruptions
+                target_row = {'id': row_id}  # Start with just the ID
+                
+                # Apply source-to-target transformations for each column
                 for column in database.schema.columns:
                     col_name = column.name
                     if col_name == 'id':
                         continue  # Skip id column
+                        
+                    # Skip columns that shouldn't be synced to target
+                    if not column.sync_to_target and not column.target_only:
+                        continue
+                        
+                    # Handle target-only computed columns
+                    if column.target_only and column.computed_from:
+                        # Get the operation and arguments/source columns
+                        operation = column.computed_from.get('operation')
+                        arguments = column.computed_from.get('arguments', [])
+                        source_columns = column.computed_from.get('source_columns', arguments)
+                        
+                        if operation and source_columns:
+                            # Collect values from source columns
+                            source_values = []
+                            for source_col in source_columns:
+                                source_values.append(row.get(source_col))
+                                
+                            # Apply the operation
+                            computed_value = Transformations.apply_computed_operation(
+                                operation, source_values
+                            )
+                            target_row[col_name] = computed_value
+                        continue
+                        
+                    if column.target_only:
+                        # Skip other target-only columns without computed_from
+                        continue
 
                     # Get the source value
-                    source_value = target_row.get(col_name)
+                    source_value = row.get(col_name)
 
                     # Check for NULL values and corrupt if necessary
                     if corruptor.corrupt_nulls and source_value is None and col_name in self.null_corruptible_columns:
@@ -112,6 +136,9 @@ class ETLProcessor:
                     elif column.target_type and column.target_type != column.type:
                         # Apply type transformation if the column has a target type different from source
                         target_row[col_name] = self.transform_for_target(source_value, column)
+                    else:
+                        # Direct copy from source
+                        target_row[col_name] = source_value
 
                 database.target_db[row_id] = target_row
 

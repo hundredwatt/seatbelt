@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 from datetime import date, datetime
+from typing import Any, Optional
 
 from ..validation.logic import (
     Operation,
@@ -12,6 +13,27 @@ from ..validation.logic import (
     check_for_validation_error
 )
 from .transformations import Transformations
+from .column_types import ColumnType
+
+def format_target_for_validation(target_value: Any, target_type: Optional[ColumnType] = None) -> Any:
+    """Format target value for validation to ensure consistent signatures"""
+    if target_value is None:
+        return None
+        
+    if target_type == ColumnType.FLOAT32:
+        # Ensure consistent float32 formatting if it's not already a string
+        if not isinstance(target_value, str):
+            return f"{float(target_value):.7g}"
+    elif target_type == ColumnType.DECIMAL:
+        # For decimal type, ensure it's a float for consistent signatures
+        if isinstance(target_value, int):
+            return float(target_value)
+    elif target_type == ColumnType.INTEGER32:
+        # Ensure int32 bounds are respected in validation
+        if isinstance(target_value, int) and not (-2147483648 <= target_value <= 2147483647):
+            return None
+            
+    return target_value
 
 # Custom JSON encoder to handle date and datetime objects
 class CustomJSONEncoder(json.JSONEncoder):
@@ -34,32 +56,67 @@ class ValidationEngine:
         # 1. Update the incremental computation based on change log entries
         incremental_computation = {}
         while self.change_log_position < len(database.source_db_log):
-            operation = database.source_db_log[self.change_log_position]
-            # Calculate incremental checksums for INSERT and UPDATE operations
-            if not operation.get('deleted', False):  # INSERT and UPDATE operations
-                source_row = database.source_db.get(operation['id'], {}).copy()
-                del source_row['ts']
-                del source_row['deleted']
-
-                # Convert source row and values to target row and values
-                target_row = source_row.copy()
-                
-                # Apply transformations based on target column types
-                for column in database.schema.columns:
-                    if column.name in target_row and target_row[column.name] is not None:
-                        # Apply column type transformation using Transformations class
-                        target_row[column.name] = Transformations.transform_source_to_target(
-                            target_row[column.name], 
-                            column.type, 
-                            column.target_type
-                        )
-                        
-                source_hash = hashlib.sha256(json.dumps(source_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest()
-                target_hash = hashlib.sha256(json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder).encode()).hexdigest() 
-               
-                incremental_computation[operation['id']] = (source_hash, target_hash)
-            
+            source_row = database.source_db_log[self.change_log_position].copy()
             self.change_log_position += 1
+
+            # Calculate incremental checksums for INSERT and UPDATE operations
+            if source_row.get('deleted', False):  # INSERT and UPDATE operations
+                continue
+
+            del source_row['ts']
+            del source_row['deleted']
+
+            # Convert source row and values to target row and values
+            target_row = source_row.copy()
+            
+            # Remove columns that shouldn't be synced to target
+            for column in database.schema.columns:
+                if getattr(column, 'sync_to_target', True) is False and column.name in target_row:
+                    del target_row[column.name]
+            
+            # Apply transformations based on target column types
+            for column in database.schema.columns:
+                # Skip columns that shouldn't be in target
+                if getattr(column, 'sync_to_target', True) is False:
+                    continue
+                    
+                # Process target-only computed columns
+                if getattr(column, 'target_only', False) and column.computed_from:
+                    op_type = column.computed_from.get('operation')
+                    arguments = column.computed_from.get('arguments', [])
+                    source_columns = column.computed_from.get('source_columns', arguments)
+                    
+                    if op_type and source_columns:
+                        # Collect values from source columns
+                        source_values = []
+                        for source_col in source_columns:
+                            source_values.append(source_row.get(source_col))
+                            
+                        # Apply the operation using the Transformations class
+                        computed_value = Transformations.apply_computed_operation(
+                            op_type, source_values
+                        )
+                        target_row[column.name] = computed_value
+                    continue
+                
+                # Apply type transformations to columns in target
+                if column.name in target_row and target_row[column.name] is not None:
+                    # Apply column type transformation using Transformations class
+                    target_row[column.name] = Transformations.transform_source_to_target(
+                        target_row[column.name], 
+                        column.type, 
+                        column.target_type
+                    )
+                    
+            source_json = json.dumps(source_row, sort_keys=True, cls=CustomJSONEncoder)
+            target_json = json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder)
+            if source_row['id'] in etl_processor.tracing_ids:
+                logging.info(f"[TRACE] SEATBELT CHECK: source_json={source_json}, target_json={target_json}")
+            source_hash = hashlib.sha256(source_json.encode()).hexdigest()
+            target_hash = hashlib.sha256(target_json.encode()).hexdigest() 
+            
+            incremental_computation[source_row['id']] = (source_hash, target_hash)
+            
             
         # 2. Read the source signatures
         source_db_signatures = {
@@ -77,7 +134,7 @@ class ValidationEngine:
             for column in database.schema.columns:
                 if column.name in target_row and target_row[column.name] is not None:
                     # Use the format_target_for_validation method from Transformations
-                    target_row[column.name] = Transformations.format_target_for_validation(
+                    target_row[column.name] = format_target_for_validation(
                         target_row[column.name], 
                         column.target_type
                     )

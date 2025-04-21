@@ -77,9 +77,10 @@ class TestResult:
 class TestRunner:
     """Class for running tests based on configuration files"""
     
-    def __init__(self, verbose: bool = False, use_color: bool = True):
+    def __init__(self, verbose: bool = False, use_color: bool = True, print_db: bool = False):
         self.verbose = verbose
         self.use_color = use_color
+        self.print_db = print_db
         self.results = []
     
     def run_test_from_file(self, test_file: str) -> List[TestResult]:
@@ -165,6 +166,10 @@ class TestRunner:
                     f"Found {final_metrics['error_count']} validation errors"
                 ))
         
+        # Print database contents if requested
+        if self.print_db:
+            self._print_database_contents(simulator, test_name)
+            
         return results
     
     def _get_top_level_expectations(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -351,14 +356,85 @@ class TestRunner:
                 print(f"Test Results: {pass_count} passed, {fail_count} failed")
         print("=" * 50)
 
+    def _print_database_contents(self, simulator: Simulator, test_name: str) -> None:
+        """Print the contents of the source and target databases"""
+        print(f"\n{'-' * 20} {test_name} Database Contents {'-' * 20}")
+        
+        schema = simulator.database.schema
+        source_db = simulator.database.source_db
+        target_db = simulator.database.target_db
+        
+        # Print source database
+        print("\nSource Database:")
+        if not source_db:
+            print("  [Empty]")
+        else:
+            # Get source-specific column names from schema (exclude target_only columns)
+            source_columns = []
+            for col in schema.columns:
+                if col.name == 'id':
+                    continue  # Skip ID column as it's shown separately
+                    
+                # Skip target_only columns in source
+                if getattr(col, 'target_only', False):
+                    continue
+                
+                source_columns.append(col.name)
+            
+            # Print header row
+            header = "  ID | " + " | ".join(source_columns)
+            print(header)
+            print("  " + "-" * (len(header) - 2))
+            
+            # Print each row
+            for row_id, row_data in source_db.items():
+                values = []
+                for col_name in source_columns:
+                    val = row_data.get(col_name, "N/A")
+                    values.append(str(val))
+                print(f"  {row_id} | {' | '.join(values)}")
+        
+        # Print target database
+        print("\nTarget Database:")
+        if not target_db:
+            print("  [Empty]")
+        else:
+            # Get target-specific column names from schema
+            target_columns = []
+            for col in schema.columns:
+                if col.name == 'id':
+                    continue  # Skip ID column as it's shown separately
+                    
+                # Skip columns not synced to target
+                if getattr(col, 'sync_to_target', True) is False:
+                    continue
+                    
+                # Include target_only columns
+                target_columns.append(col.name)
+            
+            # Print header row
+            header = "  ID | " + " | ".join(target_columns)
+            print(header)
+            print("  " + "-" * (len(header) - 2))
+            
+            # Print each row
+            for row_id, row_data in target_db.items():
+                values = []
+                for col_name in target_columns:
+                    val = row_data.get(col_name, "N/A")
+                    values.append(str(val))
+                print(f"  {row_id} | {' | '.join(values)}")
+        
+        print(f"{'-' * 60}\n")
 
-def run_tests(test_paths, verbose=False, use_color=None):
+
+def run_tests(test_paths, verbose=False, use_color=None, print_db=False):
     """Run tests from the specified files or directories"""
     # Auto-detect color support if not explicitly specified
     if use_color is None:
         use_color = supports_color()
         
-    runner = TestRunner(verbose=verbose, use_color=use_color)
+    runner = TestRunner(verbose=verbose, use_color=use_color, print_db=print_db)
     runner.results = []
     
     # Process each path

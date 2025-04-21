@@ -121,6 +121,8 @@ The simulator now supports fully customizable data schemas with the following fe
 - Support for common data types: string, integer, float, boolean, date, datetime
 - Configure nullable columns
 - Type transformations between source and target (e.g., INTEGER to FLOAT)
+- Column-level sync control with `sync_to_target` option
+- Target-only computed columns with supported operations
 - Custom data generators for realistic test data
 - Initial data configuration for testing specific scenarios
 
@@ -145,13 +147,19 @@ schema:
     - name: is_active
       type: boolean
       nullable: false
-
-initial_data:
-  row_count: 5
-  rows:
-    - first_name: John
-      age: 30
-      is_active: true
+    # Example computed column (sum of two columns)
+    - name: total_score
+      type: integer
+      nullable: false
+      target_only: true
+      computed_from:
+        operation: SUM
+        arguments: [score1, score2]
+    # Example column that isn't synced to target
+    - name: internal_id
+      type: string
+      nullable: false
+      sync_to_target: false
     
 # Define a simulation plan
 plan:
@@ -159,6 +167,32 @@ plan:
   - operation: extract
   - operation: load
 ```
+
+### Supported Column Features
+
+#### Column Sync Control
+- `sync_to_target: false` - Column exists in source but is not synced to target
+- `target_only: true` - Column exists only in target database
+
+#### Computed Columns
+Target-only columns can be computed from source columns using built-in operations:
+
+```yaml
+- name: total
+  type: integer
+  nullable: false
+  target_only: true
+  computed_from:
+    operation: SUM
+    arguments: [a, b, c]
+```
+
+#### Supported Operations
+- `SUM` - Sum of all argument values
+- `AVG` - Average of all argument values
+- `MIN` - Minimum value among arguments
+- `MAX` - Maximum value among arguments
+- `COUNT` - Count of non-null arguments
 
 See `seatbelt_demo/configs/customer_data_example.yaml` for a complete example.
 

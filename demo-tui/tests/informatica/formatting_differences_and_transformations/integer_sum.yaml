@@ -1,0 +1,93 @@
+name: Integer Sum Transformation
+random_seed: 42
+description: |
+  This test checks the behavior of a sum transformation where source columns (a, b, c)
+  are combined into a single target column (total) using the SUM operation.
+  The source columns are not synced individually to the target.
+
+schema:
+  columns:
+    - name: a
+      type: integer
+      nullable: false
+      sync_to_target: false
+    - name: b
+      type: integer
+      nullable: false
+      sync_to_target: false
+    - name: c
+      type: integer
+      nullable: false
+      sync_to_target: false
+    - name: total
+      type: integer
+      nullable: false
+      target_only: true
+      computed_from:
+        operation: SUM
+        arguments: [a, b, c]
+
+initial_data:
+  row_count: 4
+  rows:
+    - a: 1
+      b: 2
+      c: 3
+    - a: -1
+      b: -2
+      c: -3
+    - a: 5
+      b: 2
+      c: 8
+    - a: -4
+      b: 7
+      c: -8
+
+
+plan:
+  - operation: initialize
+  - operation: expect
+    name: 4 valid row after initialization
+    type: metric
+    metric: valid_count
+    comparison: equal
+    value: 4
+
+  # Test corrupting the target with incorrect sum
+  - operation: corrupt_target
+    row:
+      id: 3
+      total: -99
+  - operation: corrupt_target
+    row:
+      id: 4
+      total: 99
+  
+  - operation: seatbelt_check
+
+  # Expect validation errors after corruption
+  - operation: expect
+    name: Validation errors
+    type: validation_error
+    expected: true
+  
+  # Expect 2 discrepant rows
+  - operation: expect
+    name: 2 discrepant rows
+    type: metric
+    metric: error_count
+    comparison: equal
+    value: 2
+
+expect:
+  - name: Source row count 
+    type: metric
+    metric: source_db_size
+    comparison: equal
+    value: 4
+  
+  - name: Target row count matches
+    type: metric
+    metric: target_db_size
+    comparison: equal
+    value: 4

@@ -35,11 +35,17 @@ def convert_schema_dict(schema_dict: Dict[str, Any]) -> SchemaDefinition:
             except ValueError:
                 logging.warning(f"Invalid target_type '{target_type_str}' for column '{column_dict.get('name')}', using None")
         
+        computed_from = column_dict.get('computed_from')
+            
+        # Create the column with all properties from dictionary
         column = ColumnDefinition(
             name=column_dict.get('name'),
             type=column_type,
             nullable=column_dict.get('nullable', False),
-            target_type=target_type
+            target_type=target_type,
+            sync_to_target=column_dict.get('sync_to_target', True),
+            target_only=column_dict.get('target_only', False),
+            computed_from=computed_from
         )
         schema.add_column(column)
         

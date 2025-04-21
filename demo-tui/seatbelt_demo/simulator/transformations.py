@@ -1,6 +1,6 @@
 """Transformations for the Seatbelt Demo simulator."""
 
-from typing import Any, Optional
+from typing import Any, Optional, Dict, List
 from datetime import datetime, date
 from .column_types import ColumnType
 
@@ -83,24 +83,36 @@ class Transformations:
             return source_value
         else:
             return source_value
-    
+            
     @staticmethod
-    def format_target_for_validation(target_value: Any, target_type: Optional[ColumnType] = None) -> Any:
-        """Format target value for validation to ensure consistent signatures"""
-        if target_value is None:
+    def apply_computed_operation(operation: str, values: List[Any]) -> Any:
+        """Apply a computed operation on a list of values
+        
+        Args:
+            operation: Operation to perform ('SUM', 'AVG', etc.)
+            values: List of values to operate on
+            
+        Returns:
+            Result of the operation
+        """
+        # Filter out None values
+        valid_values = [v for v in values if v is not None]
+        
+        # Return None if no valid values
+        if not valid_values:
             return None
             
-        if target_type == ColumnType.FLOAT32:
-            # Ensure consistent float32 formatting if it's not already a string
-            if not isinstance(target_value, str):
-                return f"{float(target_value):.7g}"
-        elif target_type == ColumnType.DECIMAL:
-            # For decimal type, ensure it's a float for consistent signatures
-            if isinstance(target_value, int):
-                return float(target_value)
-        elif target_type == ColumnType.INTEGER32:
-            # Ensure int32 bounds are respected in validation
-            if isinstance(target_value, int) and not (-2147483648 <= target_value <= 2147483647):
-                return None
-                
-        return target_value 
+        # Apply the specified operation
+        if operation.upper() == 'SUM':
+            return sum(valid_values)
+        elif operation.upper() == 'AVG':
+            return sum(valid_values) / len(valid_values)
+        elif operation.upper() == 'MIN':
+            return min(valid_values)
+        elif operation.upper() == 'MAX':
+            return max(valid_values)
+        elif operation.upper() == 'COUNT':
+            return len(valid_values)
+        else:
+            # Default to returning the first value
+            return valid_values[0] if valid_values else None 

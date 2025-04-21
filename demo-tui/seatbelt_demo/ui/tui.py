@@ -241,13 +241,23 @@ def draw_source_db(stdscr, y, x, height, width, state, sim_state):
     separator_width = 3  # " | "
     margin_width = 4  # left(2) + right(2)
 
-    # Get non-ID columns
+    # Get non-ID columns that should be displayed in source (exclude target_only columns)
     non_id_columns = []
     if schema and hasattr(schema, 'columns'):
-        non_id_columns = [col for col in schema.columns if col.name != 'id'][:2]  # Get up to 2 non-ID columns
+        non_id_columns = [col for col in schema.columns 
+                          if col.name != 'id' and 
+                          not getattr(col, 'target_only', False)][:3]  # Get up to 3 non-ID columns
 
     # Table headers
-    if len(non_id_columns) == 2:
+    if len(non_id_columns) == 3:
+        # For 4-column schemas (ID + 3 data columns)
+        # Calculate width for the three data columns
+        col_space = width - id_col_width - separator_width * 3 - margin_width
+        col1_width = min(15, col_space // 3)
+        col2_width = min(15, col_space // 3)
+        col3_width = col_space - col1_width - col2_width
+        header = f"ID | {non_id_columns[0].name:<{col1_width}} | {non_id_columns[1].name:<{col2_width}} | {non_id_columns[2].name}"
+    elif len(non_id_columns) == 2:
         # For 3-column schemas (ID + 2 data columns)
         # Calculate width for the two data columns
         col1_width = min(18, (width - id_col_width - separator_width * 2 - margin_width) // 2)
@@ -275,7 +285,53 @@ def draw_source_db(stdscr, y, x, height, width, state, sim_state):
             break
 
         # Format row based on schema
-        if len(non_id_columns) == 2:
+        if len(non_id_columns) == 3:
+            # For 4-column schemas (ID + 3 data columns)
+            col1 = non_id_columns[0].name
+            col2 = non_id_columns[1].name
+            col3 = non_id_columns[2].name
+            
+            # Format value for first data column
+            val1 = row.get(col1)
+            if val1 is None:
+                val1_display = "NULL"
+            elif isinstance(val1, (float, int)):
+                val1_display = f"{val1}"
+            else:
+                val1_str = str(val1)
+                if len(val1_str) > col1_width:
+                    val1_display = val1_str[:col1_width]
+                else:
+                    val1_display = val1_str
+            
+            # Format value for second data column
+            val2 = row.get(col2)
+            if val2 is None:
+                val2_display = "NULL"
+            elif isinstance(val2, (float, int)):
+                val2_display = f"{val2}"
+            else:
+                val2_str = str(val2)
+                if len(val2_str) > col2_width:
+                    val2_display = val2_str[:col2_width]
+                else:
+                    val2_display = val2_str
+                    
+            # Format value for third data column
+            val3 = row.get(col3)
+            if val3 is None:
+                val3_display = "NULL"
+            elif isinstance(val3, (float, int)):
+                val3_display = f"{val3}"
+            else:
+                val3_str = str(val3)
+                if len(val3_str) > col3_width:
+                    val3_display = val3_str[:col3_width]
+                else:
+                    val3_display = val3_str
+            
+            row_str = f"{row['id']:<3} | {val1_display:<{col1_width}} | {val2_display:<{col2_width}} | {val3_display}"
+        elif len(non_id_columns) == 2:
             # For 3-column schemas (ID + 2 data columns)
             col1 = non_id_columns[0].name
             col2 = non_id_columns[1].name
@@ -362,13 +418,25 @@ def draw_target_db(stdscr, y, x, height, width, state, sim_state):
     separator_width = 3  # " | "
     margin_width = 4  # left(2) + right(2)
 
-    # Get non-ID columns
+    # Get non-ID columns that should be displayed in target
     non_id_columns = []
     if schema and hasattr(schema, 'columns'):
-        non_id_columns = [col for col in schema.columns if col.name != 'id'][:2]  # Get up to 2 non-ID columns
+        # Filter columns that should appear in target (either target_only or sync_to_target is not False)
+        non_id_columns = [col for col in schema.columns 
+                          if col.name != 'id' and 
+                          (getattr(col, 'target_only', False) or 
+                           not getattr(col, 'sync_to_target', True) is False)][:3]  # Get up to 3 non-ID columns
 
     # Table headers
-    if len(non_id_columns) == 2:
+    if len(non_id_columns) == 3:
+        # For 4-column schemas (ID + 3 data columns)
+        # Calculate width for the three data columns
+        col_space = width - id_col_width - separator_width * 3 - margin_width
+        col1_width = min(15, col_space // 3)
+        col2_width = min(15, col_space // 3)
+        col3_width = col_space - col1_width - col2_width
+        header = f"ID | {non_id_columns[0].name:<{col1_width}} | {non_id_columns[1].name:<{col2_width}} | {non_id_columns[2].name}"
+    elif len(non_id_columns) == 2:
         # For 3-column schemas (ID + 2 data columns)
         # Calculate width for the two data columns
         col1_width = min(18, (width - id_col_width - separator_width * 2 - margin_width) // 2)
@@ -396,7 +464,53 @@ def draw_target_db(stdscr, y, x, height, width, state, sim_state):
             break
 
         # Format row based on schema
-        if len(non_id_columns) == 2:
+        if len(non_id_columns) == 3:
+            # For 4-column schemas (ID + 3 data columns)
+            col1 = non_id_columns[0].name
+            col2 = non_id_columns[1].name
+            col3 = non_id_columns[2].name
+            
+            # Format value for first data column
+            val1 = row.get(col1)
+            if val1 is None:
+                val1_display = "NULL"
+            elif isinstance(val1, (float, int)):
+                val1_display = f"{val1}"
+            else:
+                val1_str = str(val1)
+                if len(val1_str) > col1_width:
+                    val1_display = val1_str[:col1_width]
+                else:
+                    val1_display = val1_str
+            
+            # Format value for second data column
+            val2 = row.get(col2)
+            if val2 is None:
+                val2_display = "NULL"
+            elif isinstance(val2, (float, int)):
+                val2_display = f"{val2}"
+            else:
+                val2_str = str(val2)
+                if len(val2_str) > col2_width:
+                    val2_display = val2_str[:col2_width]
+                else:
+                    val2_display = val2_str
+                    
+            # Format value for third data column
+            val3 = row.get(col3)
+            if val3 is None:
+                val3_display = "NULL"
+            elif isinstance(val3, (float, int)):
+                val3_display = f"{val3}"
+            else:
+                val3_str = str(val3)
+                if len(val3_str) > col3_width:
+                    val3_display = val3_str[:col3_width]
+                else:
+                    val3_display = val3_str
+            
+            row_str = f"{row['id']:<3} | {val1_display:<{col1_width}} | {val2_display:<{col2_width}} | {val3_display}"
+        elif len(non_id_columns) == 2:
             # For 3-column schemas (ID + 2 data columns)
             col1 = non_id_columns[0].name
             col2 = non_id_columns[1].name
@@ -515,11 +629,6 @@ def draw_pipeline(stdscr, y, x, height, width, state, sim_state):
     else:
         sync_state = sim_state['sync_state']
         add_str_safe(stdscr, mid_y, x + width - 20, f"Last LOAD TS: {sync_state['last_load_ts']}")
-
-    # Show lag
-    metrics = sim_state['metrics']
-    if metrics["lag"] > 0:
-        add_str_safe(stdscr, mid_y + 2, x + width - 20, f"LAG: {metrics['lag']} operations", curses.color_pair(4))
 
 def draw_corrupt_filter(stdscr, y, x, height, width, state, sim_state):
     """Draw the corrupt filter box showing filtered IDs."""
@@ -746,11 +855,11 @@ def draw_seatbelt(stdscr, y, x, width, state, sim_state):
         # Initial state after at least one check has run
         # Display last check timestamp
         add_str_safe(stdscr, y + 1, x + 2, f"Last Check TS: {last_seatbelt_check_ts}")
-        
+
         # Display metrics with updated terminology and order
         # First line: Valid Rows and Rows In-Flight
         add_str_safe(stdscr, y + 3, x + 2, f"Valid Rows: {metrics['valid_count']}   Rows In-Flight: {metrics['pending_count']}")
-        
+
         # Second line: Rows Discrepant - use warning symbol and bold if there are errors
         if metrics["error_count"] > 0:
             discrepant_text = f"Rows Discrepant: {metrics['error_count']}"
@@ -758,20 +867,20 @@ def draw_seatbelt(stdscr, y, x, width, state, sim_state):
             add_str_safe(stdscr, y + 4, x + 2 + len(discrepant_text) + 1, "(!) ", curses.color_pair(4))
         else:
             add_str_safe(stdscr, y + 4, x + 2, f"Rows Discrepant: {metrics['error_count']}")
-            
+
         # Display errors categorized into three types if any
         if metrics["error_count"] > 0:
             # Categorize discrepant IDs
             source_only_ids = []
             target_only_ids = []
             stale_ids = []
-            
+
             for id, data in seatbelt.items():
                 if data.get('validation_error', False):
                     # Determine the category based on source and target signatures
                     source_sig = data.get('source_signature', None)
                     target_sig = data.get('target_signature', None)
-                    
+
                     # Check if this is a NULL mismatch
                     if source_sig is not None and target_sig is None:
                         # Exists in source but not in target
@@ -782,19 +891,19 @@ def draw_seatbelt(stdscr, y, x, width, state, sim_state):
                     else:
                         # Other validation errors (stale)
                         stale_ids.append(id)
-            
+
             # Display source-only rows
             source_only_str = "Source-Only Rows: " + ", ".join(str(id) for id in source_only_ids[:5])
             if len(source_only_ids) > 5:
                 source_only_str += f" (and {len(source_only_ids) - 5} more)"
             add_str_safe(stdscr, y + 6, x + 2, source_only_str, curses.A_BOLD)
-            
+
             # Display target-only rows
             target_only_str = "Target-Only Rows: " + ", ".join(str(id) for id in target_only_ids[:5])
             if len(target_only_ids) > 5:
                 target_only_str += f" (and {len(target_only_ids) - 5} more)"
             add_str_safe(stdscr, y + 7, x + 2, target_only_str, curses.A_BOLD)
-            
+
             # Display stale rows with NULL mismatch counts
             stale_str = "Drifted Rows: " + ", ".join(str(id) for id in stale_ids[:5])
             if len(stale_ids) > 5:
@@ -804,14 +913,14 @@ def draw_seatbelt(stdscr, y, x, width, state, sim_state):
 def draw_logs(stdscr, y, x, height, width, state):
     """Draw the log messages."""
     draw_box(stdscr, y, x, height, width, "Logs")
-    
+
     # Display the most recent logs
     log_entries = state.logs[-height+2:]
     for i, log in enumerate(log_entries):
         if y + 1 + i < y + height - 1:
             # Truncate log to fit width
             log_display = log[-width+4:] if len(log) > width-4 else log
-            
+
             # Set color based on log content
             color_pair = None
             if "INSERT" in log_display:
@@ -824,13 +933,13 @@ def draw_logs(stdscr, y, x, height, width, state):
                 color_pair = curses.color_pair(4)  # Red for corruption
             elif "EXTRACT" in log_display or "LOAD" in log_display:
                 color_pair = curses.color_pair(3)  # Yellow for pipeline operations
-                
+
             add_str_safe(stdscr, y + 1 + i, x + 2, log_display, color_pair)
 
 def draw_metrics(stdscr, y, x, height, width, state, sim_state):
     """Draw the metrics."""
     draw_box(stdscr, y, x, height, width, "Metrics")
-    
+
     metrics = sim_state['metrics']
     staging = sim_state['staging']
     sync_state = sim_state['sync_state']
@@ -838,7 +947,7 @@ def draw_metrics(stdscr, y, x, height, width, state, sim_state):
     target_db = sim_state['target_db']
     last_seatbelt_check_ts = state.simulator.last_seatbelt_check_ts
     source_sequence_no = state.simulator.database.source_sequence_no
-    
+
     # Display metrics
     add_str_safe(stdscr, y + 1, x + 2, f"Lag: {metrics['lag']} operations")
     add_str_safe(stdscr, y + 2, x + 2, f"Source Ops: {metrics['source_ops_count']}")
@@ -846,7 +955,7 @@ def draw_metrics(stdscr, y, x, height, width, state, sim_state):
     add_str_safe(stdscr, y + 4, x + 2, f"Staging: {len(staging)} operations")
     add_str_safe(stdscr, y + 5, x + 2, f"Source DB Size: {len(source_db)}")
     add_str_safe(stdscr, y + 6, x + 2, f"Target DB Size: {len(target_db)}")
-    
+
     # Use warning symbol and bold if there are corruptions
     if metrics['corruption_count'] > 0:
         corruption_text = f"Corruptions: {metrics['corruption_count']}"
@@ -854,26 +963,26 @@ def draw_metrics(stdscr, y, x, height, width, state, sim_state):
         add_str_safe(stdscr, y + 7, x + 2 + len(corruption_text) + 1, "(!) ", curses.color_pair(4))
     else:
         add_str_safe(stdscr, y + 7, x + 2, f"Corruptions: {metrics['corruption_count']}")
-        
+
     # Add a blank line after Corruptions
     # Line y + 8 is now blank
-    
+
     # Add a section header for timestamps
     add_str_safe(stdscr, y + 9, x + 2, "Timestamps:", curses.color_pair(1))
     add_str_safe(stdscr, y + 10, x + 2, f"Current TS: {source_sequence_no}")
     add_str_safe(stdscr, y + 11, x + 2, f"Last Extract TS: {sync_state['last_extract_ts']}")
     add_str_safe(stdscr, y + 12, x + 2, f"Last Load TS: {sync_state['last_load_ts']}")
     add_str_safe(stdscr, y + 13, x + 2, f"Last Seatbelt TS: {last_seatbelt_check_ts}")
-    
+
     # Add a section header for seatbelt metrics
     add_str_safe(stdscr, y + 15, x + 2, "Seatbelt Metrics:", curses.color_pair(1))
-    
+
     # Show valid rows count first
     add_str_safe(stdscr, y + 16, x + 2, f"Valid Rows: {metrics['valid_count']}")
-    
+
     # Show pending count without color highlighting
     add_str_safe(stdscr, y + 17, x + 2, f"Rows In-Flight: {metrics['pending_count']}")
-    
+
     # Show error count with warning symbol and bold if there are errors
     if metrics["error_count"] > 0:
         discrepant_text = f"Rows Discrepant: {metrics['error_count']}"
@@ -894,7 +1003,7 @@ def draw_help(stdscr, y, x, width, state):
         # Regular help text
         help_line1 = "i: Insert | u: Update | d: Delete | I/U: Insert/Update w/ NULL | ^i/u: Corrupt Insert/Update"
         help_line2 = "^x: Corrupt Target Score | e: Extract | l: Load | s: Seatbelt | r: Remove Filter | n: Toggle NULL Mismap | q: Quit"
-    
+
     add_str_safe(stdscr, y, x, help_line1[:width])
     add_str_safe(stdscr, y+1, x, help_line2[:width])
 
@@ -951,7 +1060,7 @@ def start_seatbelt_animation(state):
     """Start the seatbelt animation."""
     with state.lock:
         sim_state = state.simulator.get_state()
-        
+
         state.seatbelt_animation_state = {
             "active": True,
             "step": 1,  # Start at step 1 (Reading Source DB Signatures)
@@ -1006,7 +1115,7 @@ def update_seatbelt_animation(state):
         logging.error(f"ERROR in update_seatbelt_animation: {str(e)}")
         # Reset animation state to avoid getting stuck
         state.seatbelt_animation_state["active"] = False
-        state.seatbelt_animation_state["completed"] = True 
+        state.seatbelt_animation_state["completed"] = True
 
 def load_plan_from_file(file_path):
     """Load a test plan from a YAML or JSON file."""
@@ -1027,7 +1136,7 @@ def execute_plan_step(state):
     """Execute the current step in the plan."""
     if not state.plan_execution_state["active"] or state.plan_execution_state["current_step"] >= state.plan_execution_state["total_steps"]:
         return False
-    
+
     # Get the current step
     current_step = state.plan_execution_state["current_step"]
     operation = state.plan_execution_state["plan"][current_step]
@@ -1342,7 +1451,7 @@ def run_ui_loop(stdscr, state, log_handler):
             # Get latest state from the simulator
             with state.lock:
                 sim_state = state.simulator.get_state()
-            
+
             # Get logs from log handler - use a try/except to avoid deadlocks
             try:
                 if log_handler.lock.acquire(blocking=False):
@@ -1352,10 +1461,10 @@ def run_ui_loop(stdscr, state, log_handler):
                         log_handler.lock.release()
             except Exception:
                 pass  # If we can't get logs, just continue with what we have
-            
+
             # Render the UI
             render_ui(stdscr, state, sim_state)
-            
+
             # Refresh screen
             stdscr.refresh()
             last_redraw_time = current_time
@@ -1367,19 +1476,19 @@ def main(stdscr, args, log_handler):
     """Main function for the TUI."""
     logger = logging.getLogger(__name__)
     logger.info("Initializing Seatbelt Demo TUI")
-    
+
     # Initialize TUI state
     state = TUIState()
-    
+
     # Initialize simulator and potentially load plan
     plan = None
-    
+
     # Use the config file if provided
     if args.config:
         try:
             state.simulator = Simulator.from_config_file(args.config)
             logger.info(f"Loaded custom schema from {args.config}")
-            
+
             # Check if config file includes a plan
             if not args.no_plan:
                 # Try to load the plan from the same config file
@@ -1397,26 +1506,26 @@ def main(stdscr, args, log_handler):
             state.simulator = Simulator()
     else:
         state.simulator = Simulator()
-    
+
     logger.info("Simulator initialized")
-    
+
     # Setup UI callbacks
     def on_data_changed():
         """Callback for when simulator data changes."""
         with state.lock:
             # Get the latest state from the simulator
             sim_state = state.simulator.get_state()
-            
+
             # Update TUI state from simulator state
             state.last_modified_row_id = sim_state['last_modified_row_id']
-            
+
             # Check if any rows were recently loaded
             current_time = time.time()
             if state.last_load_time != sim_state['sync_state']['last_load_ts']:
                 # Update loading timestamp and clear previous highlighting
                 state.last_load_time = current_time
                 state.recently_loaded_ids.clear()
-                
+
                 # Get IDs of rows that were loaded
                 for row_id in sim_state['target_db'].keys():
                     if row_id not in state.recently_loaded_ids:

@@ -7,7 +7,6 @@ from datetime import datetime, date
 from typing import Dict, List, Any, Optional, Tuple, Union, Callable
 from dataclasses import dataclass, field
 from .column_types import ColumnType
-from .transformations import Transformations
 
 @dataclass
 class ColumnDefinition:
@@ -21,6 +20,15 @@ class ColumnDefinition:
     
     # Function to generate test data for this column
     generator: Optional[Callable] = None
+    
+    # Whether this column should be synced to the target
+    sync_to_target: bool = True
+    
+    # Whether this column exists only in the target
+    target_only: bool = False
+    
+    # Configuration for computed columns
+    computed_from: Optional[Dict[str, Any]] = None
 
 @dataclass
 class SchemaDefinition:
@@ -134,7 +142,7 @@ class Database:
         
         # Add data for each column in the schema
         for column in self.schema.columns:
-            if column.name == 'id':
+            if column.name == 'id' or column.target_only:
                 continue  # Already handled
             
             # Use provided value or generate one
