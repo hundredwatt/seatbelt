@@ -41,6 +41,8 @@ plan:
 
   # Update a row with NULL to trigger corruption flow
   - operation: update_with_null
+    row:
+      id: 1
 
   # Extract and load with NULL corruption enabled
   - operation: extract
@@ -48,17 +50,8 @@ plan:
 
   # Run seatbelt check
   - operation: seatbelt_check
-  
-  # Another NULL update to increase chances of detection
-  - operation: update_with_null
-  
-  # Extract and load again
-  - operation: extract
-  - operation: load
-  
-  # Run seatbelt check again
   - operation: seatbelt_check
-
+  
   # Verify errors are detected
   - operation: expect
     name: NULL corruption detected

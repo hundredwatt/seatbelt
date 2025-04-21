@@ -331,7 +331,9 @@ class Database:
         
         # Update fields
         for column in self.schema.iter_source_columns():
-            if random.random() < 0.5:  # 50% chance to update each field
+            if column.name in custom_values:
+                new_row[column.name] = custom_values[column.name]
+            elif random.random() < 0.5:  # 50% chance to update each field
                 if column.generator:
                     new_row[column.name] = column.generator()
                 else:
@@ -361,8 +363,15 @@ class Database:
         
         return row_id
     
-    def update_with_null(self, metrics_tracker, sync_state, null_column=None):
-        """Update a row with a NULL value in a specified column"""
+    def update_with_null(self, metrics_tracker, sync_state, null_column=None, row_id=None):
+        """Update a row with a NULL value in a specified column
+        
+        Args:
+            metrics_tracker: Metrics tracker to update stats
+            sync_state: Current sync state
+            null_column: Optional column name to set to NULL (randomly chosen if None)
+            row_id: Optional ID of the row to update (randomly chosen if None)
+        """
         # Find a nullable column if not specified
         if null_column is None:
             nullable_columns = [col for col in self.schema.columns 
@@ -374,7 +383,7 @@ class Database:
         
         # Create custom values dict with NULL for the specified column
         custom_values = {null_column: None}
-        return self.update_row(metrics_tracker, sync_state, None, custom_values)
+        return self.update_row(metrics_tracker, sync_state, row_id, custom_values)
     
     def delete_row(self, metrics_tracker, sync_state, row_id=None):
         """Delete a row from the source database"""

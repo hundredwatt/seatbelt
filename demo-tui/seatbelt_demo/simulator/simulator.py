@@ -112,9 +112,14 @@ class Simulator:
             self.on_data_changed()
         return result
     
-    def update_with_null(self, null_column=None):
-        """Update a row with NULL value in a specified column"""
-        result = self.database.update_with_null(self.metrics_tracker, self.etl_processor.sync_state, null_column)
+    def update_with_null(self, null_column=None, row_id=None):
+        """Update a row with NULL value in a specified column
+        
+        Args:
+            null_column: Optional column name to set to NULL
+            row_id: Optional ID of the row to update
+        """
+        result = self.database.update_with_null(self.metrics_tracker, self.etl_processor.sync_state, null_column, row_id)
         if self.on_data_changed:
             self.on_data_changed()
         return result
@@ -365,7 +370,13 @@ class Simulator:
                 plan.append(lambda id=row_id, values=custom_values: self.update_row(id, values))
             elif operation == 'update_with_null':
                 column = step_config.get('column')
-                plan.append(lambda col=column: self.update_with_null(col))
+                row_id = None
+                # Check if a specific row is provided
+                if 'row' in step_config:
+                    row_data = step_config['row']
+                    if 'id' in row_data:
+                        row_id = row_data['id']
+                plan.append(lambda col=column, id=row_id: self.update_with_null(col, id))
             elif operation == 'delete':
                 row_id = step_config.get('id')
                 plan.append(lambda id=row_id: self.delete_row(id))
