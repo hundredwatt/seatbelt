@@ -22,6 +22,8 @@ if __name__ == "__main__":
                         help='Force color output even when stdout is not a TTY')
     parser.add_argument('--print-db', action='store_true',
                         help='Print the source and target databases at the end of each test')
+    parser.add_argument('--reraise', action='store_true',
+                        help='Re-raise exceptions to show the full traceback for debugging')
     args = parser.parse_args()
     
     # Determine color setting
@@ -32,5 +34,5 @@ if __name__ == "__main__":
         use_color = True
     
     # Run tests
-    success = run_tests(args.paths, args.verbose, use_color=use_color, print_db=args.print_db)
+    success = run_tests(args.paths, args.verbose, use_color=use_color, print_db=args.print_db, reraise=args.reraise)
     sys.exit(0 if success else 1) 

@@ -62,7 +62,31 @@ plan:
     row:
       id: 4
       total: 99
+    
+  # Testing corruption after insert
+  - operation: insert
+    row:
+      id: 5
+      a: 1
+      b: 2
+      c: 3
+  - operation: extract
+  - operation: load
+  - operation: corrupt_target
+    row:
+      id: 5
+      total: 1337
   
+  - operation: seatbelt_check
+  - operation: expect
+    name: 1 in-flight row
+    type: metric
+    metric: pending_count
+    comparison: equal
+    value: 1
+    
+  - operation: extract
+  - operation: load
   - operation: seatbelt_check
 
   # Expect validation errors after corruption
@@ -71,23 +95,23 @@ plan:
     type: validation_error
     expected: true
   
-  # Expect 2 discrepant rows
+  # Expect 3 discrepant rows
   - operation: expect
-    name: 2 discrepant rows
+    name: 3 discrepant rows
     type: metric
     metric: error_count
     comparison: equal
-    value: 2
+    value: 3
 
 expect:
   - name: Source row count 
     type: metric
     metric: source_db_size
     comparison: equal
-    value: 4
+    value: 5
   
   - name: Target row count matches
     type: metric
     metric: target_db_size
     comparison: equal
-    value: 4
+    value: 5

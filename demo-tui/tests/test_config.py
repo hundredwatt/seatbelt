@@ -77,10 +77,11 @@ class TestResult:
 class TestRunner:
     """Class for running tests based on configuration files"""
     
-    def __init__(self, verbose: bool = False, use_color: bool = True, print_db: bool = False):
+    def __init__(self, verbose: bool = False, use_color: bool = True, print_db: bool = False, reraise: bool = False):
         self.verbose = verbose
         self.use_color = use_color
         self.print_db = print_db
+        self.reraise = reraise
         self.results = []
     
     def run_test_from_file(self, test_file: str) -> List[TestResult]:
@@ -93,6 +94,8 @@ class TestRunner:
             return self.run_test(config, test_name)
             
         except Exception as e:
+            if self.reraise:
+                raise
             return [TestResult(test_file, False, f"Error loading test: {str(e)}")]
     
     def run_test(self, config: Dict[str, Any], test_name: str) -> List[TestResult]:
@@ -142,6 +145,8 @@ class TestRunner:
             try:
                 self._execute_operation(simulator, step)
             except Exception as e:
+                if self.reraise:
+                    raise
                 results.append(TestResult(
                     f"{test_name} - Error executing {operation}", 
                     False, 
@@ -428,13 +433,13 @@ class TestRunner:
         print(f"{'-' * 60}\n")
 
 
-def run_tests(test_paths, verbose=False, use_color=None, print_db=False):
+def run_tests(test_paths, verbose=False, use_color=None, print_db=False, reraise=False):
     """Run tests from the specified files or directories"""
     # Auto-detect color support if not explicitly specified
     if use_color is None:
         use_color = supports_color()
         
-    runner = TestRunner(verbose=verbose, use_color=use_color, print_db=print_db)
+    runner = TestRunner(verbose=verbose, use_color=use_color, print_db=print_db, reraise=reraise)
     runner.results = []
     
     # Process each path

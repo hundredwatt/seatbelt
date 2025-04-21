@@ -257,6 +257,8 @@ class ValidationEngine:
             elif source_operation not in [Operation.NOOP, Operation.DOES_NOT_EXIST] and target_operation in [Operation.NOOP, Operation.DOES_NOT_EXIST]:
                 # Count rows that are present in source but not yet in target_db (or have a different state)
                 pending_count += 1
+            elif not incremental_match:
+                pending_count += 1
             elif null_mismatch:
                 # Count NULL mismatches as pending
                 pending_count += 1

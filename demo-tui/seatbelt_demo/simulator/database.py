@@ -248,7 +248,7 @@ class Database:
         
         # Generate data for each column in the schema
         for column in self.schema.columns:
-            if column.name == 'id':
+            if column.name == 'id' or column.target_only:
                 continue  # Already handled
                 
             # Use custom value if provided
@@ -269,7 +269,7 @@ class Database:
         # Create log message
         log_parts = [f"INSERT: id={self.primary_key_sequence_no}, ts={self.source_sequence_no}"]
         for column in self.schema.columns:
-            if column.name != 'id':
+            if column.name != 'id' and not column.target_only and column.name in new_row:
                 log_parts.append(f"{column.name}={new_row[column.name]}")
         
         logging.info(", ".join(log_parts))
@@ -338,7 +338,9 @@ class Database:
         # Build log message with changes
         log_parts = [f"UPDATE: id={row_id}, ts={self.source_sequence_no}"]
         for column in self.schema.columns:
-            if column.name != 'id' and original_row.get(column.name) != new_row.get(column.name):
+            if (column.name != 'id' and not column.target_only and
+                column.name in original_row and column.name in new_row and 
+                original_row.get(column.name) != new_row.get(column.name)):
                 log_parts.append(f"{column.name}: {original_row.get(column.name)} -> {new_row.get(column.name)}")
         
         logging.info(", ".join(log_parts))
