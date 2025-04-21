@@ -51,6 +51,28 @@ class SchemaDefinition:
         """Check if schema has a column with the given name"""
         return any(column.name == name for column in self.columns)
 
+    def iter_source_columns(self, include_id: bool = False):
+        """Iterate over columns that exist in the *source* database (i.e. not target_only)."""
+        for column in self.columns:
+            if column.target_only:
+                # Columns that exist only in the target DB should be skipped in source operations
+                continue
+            if not include_id and column.name == 'id':
+                continue
+            yield column
+
+    def iter_target_columns(self, include_id: bool = False):
+        """Iterate over columns that should exist in the *target* database.
+
+        A column appears in the target if it is either explicitly marked as ``target_only`` or
+        it is a regular column that is allowed to be synced to the target (``sync_to_target``).
+        """
+        for column in self.columns:
+            if column.name == 'id' and not include_id:
+                continue
+            if column.target_only or column.sync_to_target:
+                yield column
+
 @dataclass
 class InitialData:
     """Initial data configuration for the database"""
@@ -140,11 +162,8 @@ class Database:
             'deleted': False
         }
         
-        # Add data for each column in the schema
-        for column in self.schema.columns:
-            if column.name == 'id' or column.target_only:
-                continue  # Already handled
-            
+        # Add data for each column in the schema (source columns only)
+        for column in self.schema.iter_source_columns():
             # Use provided value or generate one
             if column.name in row_data:
                 new_row[column.name] = row_data[column.name]
@@ -173,11 +192,8 @@ class Database:
             'deleted': False
         }
         
-        # Generate data for each column in the schema
-        for column in self.schema.columns:
-            if column.name == 'id':
-                continue  # Already handled
-                
+        # Generate data for each source column in the schema
+        for column in self.schema.iter_source_columns():
             if column.generator:
                 # Use custom generator
                 new_row[column.name] = column.generator()
@@ -246,11 +262,8 @@ class Database:
             'deleted': False,
         }
         
-        # Generate data for each column in the schema
-        for column in self.schema.columns:
-            if column.name == 'id' or column.target_only:
-                continue  # Already handled
-                
+        # Generate data for each source column in the schema
+        for column in self.schema.iter_source_columns():
             # Use custom value if provided
             if custom_values and column.name in custom_values:
                 new_row[column.name] = custom_values[column.name]
@@ -268,8 +281,8 @@ class Database:
         
         # Create log message
         log_parts = [f"INSERT: id={self.primary_key_sequence_no}, ts={self.source_sequence_no}"]
-        for column in self.schema.columns:
-            if column.name != 'id' and not column.target_only and column.name in new_row:
+        for column in self.schema.iter_source_columns():
+            if column.name in new_row:
                 log_parts.append(f"{column.name}={new_row[column.name]}")
         
         logging.info(", ".join(log_parts))
@@ -317,14 +330,8 @@ class Database:
         new_row['ts'] = self.source_sequence_no
         
         # Update fields
-        for column in self.schema.columns:
-            if column.name == 'id':
-                continue  # Don't update ID
-                
-            # Use custom value if provided
-            if custom_values and column.name in custom_values:
-                new_row[column.name] = custom_values[column.name]
-            elif random.random() < 0.5:  # 50% chance to update each field
+        for column in self.schema.iter_source_columns():
+            if random.random() < 0.5:  # 50% chance to update each field
                 if column.generator:
                     new_row[column.name] = column.generator()
                 else:
@@ -337,9 +344,8 @@ class Database:
         
         # Build log message with changes
         log_parts = [f"UPDATE: id={row_id}, ts={self.source_sequence_no}"]
-        for column in self.schema.columns:
-            if (column.name != 'id' and not column.target_only and
-                column.name in original_row and column.name in new_row and 
+        for column in self.schema.iter_source_columns():
+            if (column.name in original_row and column.name in new_row and 
                 original_row.get(column.name) != new_row.get(column.name)):
                 log_parts.append(f"{column.name}: {original_row.get(column.name)} -> {new_row.get(column.name)}")
         

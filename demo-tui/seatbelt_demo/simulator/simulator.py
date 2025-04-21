@@ -10,8 +10,7 @@ from .database import Database, SchemaDefinition, InitialData, ColumnDefinition
 from .corruptor import Corruptor
 from .etl import ETLProcessor
 from .validation import ValidationEngine
-from .config import load_simulator_config, get_default_config, ConfigurationError
-from .column_types import ColumnType
+from .config import load_simulator_config, get_default_config, ConfigurationError, TRACING_IDS, load_tracing_ids_from_env
 
 class Simulator:
     """Main class for orchestrating data simulation and validation"""
@@ -47,6 +46,8 @@ class Simulator:
         else:
             # Use default seatbelt interval if not from config
             self.seatbelt_interval = 25
+            # Load tracing IDs from environment 
+            load_tracing_ids_from_env()
             
         # Initialize components
         self.metrics_tracker = MetricsTracker()
@@ -222,7 +223,7 @@ class Simulator:
     
     def seatbelt_check(self):
         """Perform validation between source and target databases"""
-        result = self.validation_engine.seatbelt_check(self.database, self.etl_processor, self.metrics_tracker)
+        result = self.validation_engine.seatbelt_check(self.database, self.metrics_tracker)
         self.last_seatbelt_check_ts = self.database.source_sequence_no
         if self.on_data_changed:
             self.on_data_changed()
@@ -250,6 +251,7 @@ class Simulator:
             'seatbelt': self.validation_engine.seatbelt,
             'last_modified_row_id': self.database.last_modified_row_id,
             'schema': self.database.schema,
+            'tracing_ids': TRACING_IDS
         }
     
     def run_simulation(self, plan=None):

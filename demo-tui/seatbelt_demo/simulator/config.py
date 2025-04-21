@@ -3,6 +3,7 @@
 import json
 import yaml
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Callable
 from dataclasses import asdict
@@ -11,9 +12,27 @@ from .column_types import ColumnType
 from .database import SchemaDefinition, ColumnDefinition, InitialData
 from .schema_utils import convert_schema_dict, convert_initial_data_dict
 
+# Global tracing IDs list
+TRACING_IDS = []
+
 class ConfigurationError(Exception):
     """Exception raised for configuration errors."""
     pass
+
+def load_tracing_ids_from_env():
+    """Load tracing IDs from TRACING_IDS environment variable."""
+    global TRACING_IDS
+    tracing_ids_env = os.environ.get('TRACING_IDS', '')
+    if tracing_ids_env:
+        try:
+            # Parse comma-separated list of IDs
+            parsed = [int(id_str.strip()) for id_str in tracing_ids_env.split(',') if id_str.strip()]
+            for id in parsed:
+                TRACING_IDS.append(id)
+            logging.info(f"Loaded tracing IDs from environment: {TRACING_IDS}")
+        except ValueError as e:
+            logging.warning(f"Error parsing TRACING_IDS environment variable: {e}")
+    return TRACING_IDS
 
 def load_config_file(file_path: Union[str, Path]) -> Dict[str, Any]:
     """Load a configuration file (YAML or JSON)."""
@@ -64,6 +83,9 @@ def load_simulator_config(file_path: Union[str, Path]) -> Dict[str, Any]:
         'random_seed': config.get('random_seed', 42),
         'seatbelt_interval': config.get('seatbelt_interval', 25),
     }
+    
+    # Always load tracing IDs from environment
+    load_tracing_ids_from_env()
     
     logging.info(f"Loaded configuration from {file_path}")
     return result
@@ -124,6 +146,9 @@ def save_config_to_file(config: Dict[str, Any], file_path: Union[str, Path]) -> 
 def get_default_config() -> Dict[str, Any]:
     """Get a default configuration."""
     # Removed schema definition here - Database class provides its own default
+    
+    # Always load tracing IDs from environment
+    load_tracing_ids_from_env()
     
     return {
         'initial_data': InitialData(),

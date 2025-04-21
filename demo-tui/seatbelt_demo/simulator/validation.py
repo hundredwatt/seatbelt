@@ -14,6 +14,7 @@ from ..validation.logic import (
 )
 from .transformations import Transformations
 from .column_types import ColumnType
+from .config import TRACING_IDS
 
 def format_target_for_validation(target_value: Any, target_type: Optional[ColumnType] = None) -> Any:
     """Format target value for validation to ensure consistent signatures"""
@@ -51,7 +52,7 @@ class ValidationEngine:
         self.seatbelt = {}
         self.change_log_position = 0
         
-    def seatbelt_check(self, database, etl_processor, metrics_tracker):
+    def seatbelt_check(self, database, metrics_tracker):
         """Validate data between source and target databases"""
         # 1. Update the incremental computation based on change log entries
         incremental_computation = {}
@@ -70,16 +71,17 @@ class ValidationEngine:
             target_row = source_row.copy()
             
             # Remove columns that shouldn't be synced to target
+            for column in database.schema.iter_target_columns():
+                # We will build the row later; this loop ensures we remove unwanted ones first
+                pass  # iter_target_columns yields only allowed columns, so no deletion here
+
+            # However, we still need to ensure fields that should NOT sync are removed
             for column in database.schema.columns:
-                if getattr(column, 'sync_to_target', True) is False and column.name in target_row:
+                if (not column.sync_to_target and not column.target_only) and column.name in target_row:
                     del target_row[column.name]
             
             # Apply transformations based on target column types
-            for column in database.schema.columns:
-                # Skip columns that shouldn't be in target
-                if getattr(column, 'sync_to_target', True) is False:
-                    continue
-                    
+            for column in database.schema.iter_target_columns():
                 # Process target-only computed columns
                 if getattr(column, 'target_only', False) and column.computed_from:
                     op_type = column.computed_from.get('operation')
@@ -110,7 +112,7 @@ class ValidationEngine:
                     
             source_json = json.dumps(source_row, sort_keys=True, cls=CustomJSONEncoder)
             target_json = json.dumps(target_row, sort_keys=True, cls=CustomJSONEncoder)
-            if source_row['id'] in etl_processor.tracing_ids:
+            if source_row['id'] in TRACING_IDS:
                 logging.info(f"[TRACE] SEATBELT CHECK: source_json={source_json}, target_json={target_json}")
             source_hash = hashlib.sha256(source_json.encode()).hexdigest()
             target_hash = hashlib.sha256(target_json.encode()).hexdigest() 
@@ -225,7 +227,7 @@ class ValidationEngine:
             if source_duplication or target_duplication:
                 error = True
                 
-            if id in etl_processor.tracing_ids:
+            if id in TRACING_IDS:
                 logging.info(f"[TRACE] SEATBELT CHECK: id={id}, source_operation={source_operation}, previous_source_operation={previous_source_operation}, target_operation={target_operation}, previous_target_operation={previous_target_operation}, previous_error={previous_error}, error={error}, null_mismatch={null_mismatch}, incremental_match={incremental_match}")
                 
             self.seatbelt[id] = {
