@@ -253,7 +253,7 @@ class Simulator:
             'corrupt_filter': self.corruptor.corrupt_filter,
             'corrupt_nulls': self.corruptor.corrupt_nulls,
             'corruptible_columns': self.etl_processor.null_corruptible_columns,
-            'seatbelt': self.validation_engine.seatbelt,
+            'seatbelt': self.validation_engine.get_seatbelt(),
             'last_modified_row_id': self.database.last_modified_row_id,
             'schema': self.database.schema,
             'tracing_ids': TRACING_IDS

@@ -179,3 +179,6 @@ class SimulationValidationEngine:
         )
         
         return metrics_tracker.get() 
+    
+    def get_seatbelt(self):
+        return self.engine.seatbelt
