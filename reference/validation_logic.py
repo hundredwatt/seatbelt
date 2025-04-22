@@ -83,7 +83,7 @@ def check_for_validation_error(source_operation: Operation,
         and destination_operation in [NOOP, DOES_NOT_EXIST] \
         and source_operation in [NOOP, DOES_NOT_EXIST]:
         return True
-    
+
     # The DELETE operation in the previous source operation did not replicate to the destination
     if previous_source_operation == DELETE \
     and destination_operation == NOOP:
@@ -107,7 +107,7 @@ def check_for_validation_error(source_operation: Operation,
     and previous_source_operation == NOOP \
     and destination_operation != NOOP:
         return True
-    
+
     # Row Corrupted (detected by incremental checksums)
     if source_operation == NOOP \
     and not row_verified:
@@ -172,7 +172,7 @@ if __name__ == "__main__":
             print(f"  Expected: {expected}")
             print(f"  Got: {result}")
             exit(1)
-            
+
     # Test check_for_validation_error
     print(f"\n{Style.BRIGHT}Testing check_for_validation_error:{Style.RESET_ALL}")
     for test in test_cases['test_check_for_validation_error']:
@@ -194,7 +194,7 @@ if __name__ == "__main__":
             print(f"  Expected: {expected}")
             print(f"  Got: {result}")
             exit(1)
-    
+
     # Test verify_row_integrity_from_incremental_checksums
     print(f"\n{Style.BRIGHT}Testing verify_row_integrity_from_incremental_checksums:{Style.RESET_ALL}")
     for test in test_cases['test_row_integrity_from_incremental_checksums']:
