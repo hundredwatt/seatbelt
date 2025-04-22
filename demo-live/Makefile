@@ -30,3 +30,10 @@ seatbelt_mark_as_repaired:
 	fi
 	@echo "./seatbelt mark_as_repaired -r sling-conf/replication.yml"
 	@python3 seatbelt/mark_as_repaired.py 
+
+seatbelt_reset:
+	@rm -rf data/seatbelt/*
+	@if [ -f data/sling/last_succeeded ]; then \
+		rm data/sling/last_succeeded; \
+	fi
+	@mkdir -p data/seatbelt

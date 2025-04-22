@@ -240,23 +240,23 @@ class PostgresTarget(Target):
 
 def main():
     """Run the validation between MySQL and PostgreSQL."""
-    # Create shadow directory if it doesn't exist
-    shadow_dir = Path("data/seatbelt")
-    shadow_dir.mkdir(parents=True, exist_ok=True)
+    # Create seatbelt data directory if it doesn't exist
+    seatbelt_data_dir = Path("data/seatbelt")
+    seatbelt_data_dir.mkdir(parents=True, exist_ok=True)
     
-    # Generate shadow file path with timestamp
+    # Generate seatbelt data file path with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    shadow_file = shadow_dir / f"seatbelt_{timestamp}.json"
+    seatbelt_data_file = seatbelt_data_dir / f"seatbelt_{timestamp}.json"
     
     # Create validation engine
-    # Check if previous shadow file exists and load it
-    previous_shadow_files = list(shadow_dir.glob("seatbelt_*.json"))
-    previous_shadow_file = max(previous_shadow_files, default=None, key=lambda x: x.stat().st_mtime)
+    # Check if previous seatbelt data file exists and load it
+    previous_seatbelt_data_files = list(seatbelt_data_dir.glob("seatbelt_*.json"))
+    previous_seatbelt_data_file = max(previous_seatbelt_data_files, default=None, key=lambda x: x.stat().st_mtime)
     
     engine = None
-    if previous_shadow_file:
+    if previous_seatbelt_data_file:
         logger.info(f"Loading previous seatbelt file")
-        engine = ValidationEngine(shadow_file=str(previous_shadow_file))
+        engine = ValidationEngine(shadow_file=str(previous_seatbelt_data_file))
     else:
         logger.info("No previous seatbelt file found, starting fresh")
         engine = ValidationEngine()
@@ -270,8 +270,8 @@ def main():
         logger.info("Running seatbelt validation...")
         metrics = engine.seatbelt_check(source, target, column_names=COLUMNS)
         
-        # Save shadow to file
-        engine.save_shadow(str(shadow_file))
+        # Save seatbelt_data to file
+        engine.save_shadow(str(seatbelt_data_file))
         
         # Print results
         print()
@@ -280,7 +280,7 @@ def main():
         print(f"Target size: {metrics['target_size']}")
         print(f"Valid rows: {metrics['valid_count']}")
         print(f"Pending rows: {metrics['pending_count']}")
-        print(f"Error rows: {metrics['error_count']}")
+        print(f"Discrepant rows: {metrics['error_count']}")
 
         print()
         print(f"Invalid row IDs: {[id for id, entry in engine.shadow.items() if entry['validation_error'] == True]}")
