@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # MySQL Source Database
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_source
+    ports:
+      - "55800:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: qwe123
+      MYSQL_USER: mysqluser
+      MYSQL_PASSWORD: mysqlpw
+      MYSQL_DATABASE: mysql_db
+    volumes:
+      - ./mysql-init:/docker-entrypoint-initdb.d
+      - ./data/mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+             --binlog-format=ROW
+             --log-bin=mysql-bin
+             --server-id=1
+             --binlog-row-image=FULL
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdebezium"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL Sink Database
+  postgres:
+    image: postgres:14
+    container_name: postgres_sink
+    ports:
+      - "55802:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sling
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d
+      - ./data/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

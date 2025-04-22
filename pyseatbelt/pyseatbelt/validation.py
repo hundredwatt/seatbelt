@@ -126,7 +126,7 @@ class ValidationEngine:
                 with open(shadow_file, 'r') as f:
                     # Our custom_json_decoder will handle numeric keys and Operation enums
                     self.shadow = json.load(f, object_hook=custom_json_decoder)
-                logging.info(f"Shadow loaded from {shadow_file} with {len(self.shadow)} entries")
+                logging.info(f"Seatbelt data loaded")
             except Exception as e:
                 logging.error(f"Failed to load shadow from {shadow_file}: {str(e)}")
 
@@ -142,10 +142,10 @@ class ValidationEngine:
         try:
             with open(file_path, 'w') as f:
                 json.dump(self.shadow, f, cls=CustomJSONEncoder, indent=2)
-            logging.info(f"Shadow saved to {file_path} with {len(self.shadow)} entries")
+            logging.info(f"Seatbelt data saved")
             return True
         except Exception as e:
-            logging.error(f"Failed to save shadow to {file_path}: {str(e)}")
+            logging.error(f"Failed to save seatbelt data to {file_path}: {str(e)}")
             return False
 
     def seatbelt_check(self, source: Source, target: Target, column_names: List[str] = None):

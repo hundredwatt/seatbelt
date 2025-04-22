@@ -18,9 +18,9 @@ def load_tracing_ids_from_env():
             parsed = [int(id_str.strip()) for id_str in tracing_ids_env.split(',') if id_str.strip()]
             for id in parsed:
                 TRACING_IDS.append(id)
-            logging.info(f"Loaded tracing IDs from environment: {TRACING_IDS}")
+            # logging.info(f"Loaded tracing IDs from environment: {TRACING_IDS}")
         except ValueError as e:
-            logging.warning(f"Error parsing TRACING_IDS environment variable: {e}")
+            # logging.warning(f"Error parsing TRACING_IDS environment variable: {e}")
             raise ConfigurationError(f"Error parsing TRACING_IDS environment variable: {e}")
     return TRACING_IDS
 

@@ -1,0 +1,13 @@
+source: 'mysql://replication_user:abc123@0.0.0.0:55800/mysql_db'
+target: 'postgresql://postgres:postgres@0.0.0.0:55802/sling?sslmode=disable'
+
+defaults:
+  mode: full-refresh
+  object: sling.{stream_schema}_{stream_table}
+
+streams:
+  mysql_db.*:
+
+env:
+  SLING_THREADS: 1
+
