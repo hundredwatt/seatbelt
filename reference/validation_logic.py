@@ -105,7 +105,8 @@ def check_for_validation_error(source_operation: Operation,
     # Corrupted destination (detected by data change validation) - destination shows changes but source is unchanged
     if source_operation == NOOP \
     and previous_source_operation == NOOP \
-    and destination_operation != NOOP:
+    and destination_operation != NOOP \
+    and not existing_validation_error:
         return True
 
     # Row Corrupted (detected by incremental checksums)

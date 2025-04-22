@@ -236,6 +236,17 @@
         "existing_validation_error": false
       },
       "expected": true
+    },
+    {
+      "name": "Destination change when there's a validation error (assume it's a repair operation)",
+      "input": {
+        "source_operation": {"name": "NOOP", "value": 2},
+        "previous_source_operation": {"name": "NOOP", "value": 2},
+        "destination_operation": {"name": "UPDATE", "value": 4},
+        "previous_destination_operation": {"name": "NOOP", "value": 2},
+        "existing_validation_error": true
+      },
+      "expected": false
     }
   ],
   "test_row_integrity_from_incremental_checksums": [
@@ -342,6 +353,30 @@
           "row_verified": false
         },
       "expected": true
+    },
+    {
+      "name": "Destination corruption when there's an existing validation error, row not verified",
+      "input": {
+          "source_operation": {"name": "NOOP", "value": 2},
+          "previous_source_operation": {"name": "NOOP", "value": 2},
+          "destination_operation": {"name": "UPDATE", "value": 4},
+          "previous_destination_operation": {"name": "NOOP", "value": 2},
+          "existing_validation_error": true,
+          "row_verified": false
+        },
+      "expected": true
+    },
+    {
+      "name": "Destination repaired",
+      "input": {
+          "source_operation": {"name": "NOOP", "value": 2},
+          "previous_source_operation": {"name": "NOOP", "value": 2},
+          "destination_operation": {"name": "UPDATE", "value": 4},
+          "previous_destination_operation": {"name": "NOOP", "value": 2},
+          "existing_validation_error": true,
+          "row_verified": true
+        },
+      "expected": false
     }
   ]
 }
