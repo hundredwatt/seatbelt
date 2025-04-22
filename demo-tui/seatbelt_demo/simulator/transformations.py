@@ -1,7 +1,9 @@
 """Transformations for the Seatbelt Demo simulator."""
 
 from typing import Any, Optional, Dict, List
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+import email.utils
+import logging
 from .column_types import ColumnType
 
 class Transformations:
@@ -11,7 +13,35 @@ class Transformations:
     def transform_source_to_target(source_value: Any, column_type: ColumnType, 
                                   target_type: Optional[ColumnType] = None) -> Any:
         """Transform a value from source type to target type if needed"""
-        if source_value is None or not target_type or column_type == target_type:
+        if source_value is None:
+            return None
+            
+        # Special case for DATETIME - convert from RFC 2822 Mountain Time to ISO 8601 UTC
+        if column_type == ColumnType.DATETIME:
+            if isinstance(source_value, str):
+                try:
+                    # Parse RFC 2822 timestamp string to datetime object
+                    dt = email.utils.parsedate_to_datetime(source_value)
+                    # Convert to UTC
+                    dt_utc = dt.astimezone(timezone.utc)
+                    # Format as ISO 8601
+                    iso_format = dt_utc.isoformat()
+                    logging.debug(f"TIMESTAMP CONVERSION: {source_value} -> {iso_format}")
+                    return iso_format
+                except Exception as e:
+                    logging.debug(f"TIMESTAMP PARSE ERROR: {source_value} - {str(e)}")
+                    raise
+            elif isinstance(source_value, datetime):
+                # If already a datetime object, convert to UTC and format as ISO 8601
+                dt_utc = source_value.astimezone(timezone.utc)
+                iso_format = dt_utc.isoformat()
+                logging.debug(f"TIMESTAMP CONVERSION (datetime): {source_value} -> {iso_format}")
+                return iso_format
+            else:
+                raise ValueError(f"Invalid DATETIME value: {source_value}")
+            return source_value
+            
+        if not target_type or column_type == target_type:
             # For DECIMAL type, ensure we always format with 2 decimal places
             if column_type == ColumnType.DECIMAL and source_value is not None:
                 return round(float(source_value), 2)
@@ -27,7 +57,7 @@ class Transformations:
                     # Return NULL for out-of-bounds values
                     return None
             return source_value
-            
+        
         # Transform based on target type
         if target_type == ColumnType.INTEGER:
             # Convert to integer

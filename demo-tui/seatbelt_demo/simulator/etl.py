@@ -121,15 +121,13 @@ class ETLProcessor:
                         )
                         null_corrupted_count += 1
                         logging.debug(f"NULL CORRUPTED: id={row_id}, column={col_name} (NULL Mismap)")
-                    elif column.target_type and column.target_type != column.type:
-                        target_row[col_name] = self.transform_for_target(source_value, column)
                     else:
-                        target_row[col_name] = source_value
+                        target_row[col_name] = self.transform_for_target(source_value, column)
 
                 database.target_db[row_id] = target_row
 
                 if row_id in TRACING_IDS:
-                    logging.info(f"[TRACE] LOAD - UPSERT: id={row_id}, ts={row['ts']}, deleted={row['deleted']}")
+                    logging.info(f"[TRACE] LOAD - UPSERT: id={row_id}, ts={row['ts']}, deleted={row['deleted']}, row={target_row}")
 
         # Update sync state to mark when the last load occurred
         self.sync_state['last_load_ts'] = database.source_sequence_no
