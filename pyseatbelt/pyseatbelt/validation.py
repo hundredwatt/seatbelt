@@ -2,6 +2,7 @@
 
 import json
 import logging
+import enum
 from datetime import date, datetime
 from typing import Any, Optional, List, Tuple, Dict
 from abc import ABC, abstractmethod
@@ -34,6 +35,9 @@ class CustomJSONEncoder(json.JSONEncoder):
         # Add handling for Operation enum values
         if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Operation':
             return {"__operation__": obj.value}
+        # Add handling for ValidationStatus enum values
+        if isinstance(obj, ValidationStatus):
+            return {"__validation_status__": obj.value}
         return super().default(obj)
 
 # Custom object hook for JSON decoding to handle Operation enums and convert numeric keys
@@ -54,6 +58,14 @@ def custom_json_decoder(obj):
             try:
                 return UTINYINT_TO_OPERATION[result["__operation__"]]
             except (KeyError, TypeError):
+                # If we can't convert it, just return the original object
+                return result
+        
+        # Handle ValidationStatus enum values
+        if len(result) == 1 and "__validation_status__" in result:
+            try:
+                return ValidationStatus(result["__validation_status__"])
+            except (KeyError, TypeError, ValueError):
                 # If we can't convert it, just return the original object
                 return result
         
@@ -105,6 +117,16 @@ class Target(ABC):
             Dictionary mapping row IDs to signatures
         """
         pass
+
+class ValidationStatus(enum.Enum):
+    """Enum for validation status."""
+    VALID = 0
+    PENDING = 1
+    ERROR = 2
+    GONE = 3
+
+    def __str__(self):
+        return self.name
 
 class ValidationEngine:
     """Class responsible for data validation between source and target."""
@@ -220,11 +242,25 @@ class ValidationEngine:
                 incremental_match
             )
             
-            pending = False
-            if not error:
+            status = None
+            if error:
+                status = ValidationStatus.ERROR
+            elif not error:
                 pending = source_operation not in [Operation.NOOP, Operation.DOES_NOT_EXIST] and target_operation in [Operation.NOOP, Operation.DOES_NOT_EXIST]
                 pending |= not incremental_match and source_operation not in [Operation.DOES_NOT_EXIST, Operation.DELETE]
                 pending |= source_operation in [Operation.DOES_NOT_EXIST, Operation.DELETE] and target_operation not in [Operation.DOES_NOT_EXIST, Operation.DELETE]
+
+                gone = source_operation in [Operation.DOES_NOT_EXIST, Operation.DELETE] and target_operation in [Operation.DOES_NOT_EXIST, Operation.DELETE]
+
+                if gone:
+                    status = ValidationStatus.GONE
+                elif pending:
+                    status = ValidationStatus.PENDING
+                else:
+                    status = ValidationStatus.VALID
+
+            if id in TRACING_IDS:
+                logging.info(f"[TRACE] SEATBELT CHECK: id={id}, validation_status={status}, source_operation={source_operation}, previous_source_operation={previous_source_operation}, target_operation={target_operation}, previous_target_operation={previous_target_operation}, previous_error={previous_error}, error={error}, incremental_match={incremental_match}")
 
             self.shadow[id] = {
                 'source_signature': source_signature,
@@ -234,29 +270,27 @@ class ValidationEngine:
                 'source_operation': source_operation,
                 'target_operation': target_operation,
                 'validation_error': error,
+                'validation_status': status,
             }
 
-            if error:
-                error_count += 1
-                # Categorize the error
-                if source_signature is not None and target_signature is None:
-                    # Exists in source but not in target
-                    source_only_ids.append(id)
-                elif source_signature is None and target_signature is not None:
-                    # Exists in target but not in source
-                    target_only_ids.append(id)
-                else:
-                    # Other validation errors (stale)
-                    stale_ids.append(id)
-            elif pending:
-                pending_count += 1
-            if not pending and not error and source_signature is not None and target_signature is not None:
-                # Count rows that are present in both source and target and have no errors
-                valid_count += 1
+            match status:
+                case ValidationStatus.VALID:
+                    valid_count += 1
+                case ValidationStatus.PENDING:
+                    pending_count += 1
+                case ValidationStatus.ERROR:
+                    error_count += 1
+                    # Categorize the error
+                    if source_signature is not None and target_signature is None:
+                        # Exists in source but not in target
+                        source_only_ids.append(id)
+                    elif source_signature is None and target_signature is not None:
+                        # Exists in target but not in source
+                        target_only_ids.append(id)
+                    else:
+                        # Other validation errors (stale)
+                        stale_ids.append(id)
 
-            if id in TRACING_IDS:
-                status = "VALID" if not pending and not error else "PENDING" if pending else "ERROR"
-                logging.info(f"[TRACE] SEATBELT CHECK: id={id}, status={status}, source_operation={source_operation}, previous_source_operation={previous_source_operation}, target_operation={target_operation}, previous_target_operation={previous_target_operation}, previous_error={previous_error}, error={error}, incremental_match={incremental_match}")
 
         # Update metrics
         self.metrics.update(

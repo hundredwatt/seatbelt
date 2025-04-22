@@ -177,6 +177,39 @@ class TestValidationEngine(unittest.TestCase):
         self.assertEqual(metrics['source_size'], 4)
         self.assertEqual(metrics['target_size'], 3)
         self.assertEqual(metrics['pending_count'], 1)
+    
+    def test_deleted_row(self):
+        """Test validation when a row is deleted in the source."""
+        source = TestSource([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+        ])
+        target = TestTarget([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+        ])
+
+        # Run validation
+        metrics = self.engine.seatbelt_check(source, target)
+
+        # Check metrics - expect pending change for ID 4
+        self.assertEqual(metrics['source_size'], 2)
+        self.assertEqual(metrics['target_size'], 3)
+        self.assertEqual(metrics['pending_count'], 1)
+        self.assertEqual(metrics['error_count'], 0)
+
+        target.target_db = target.target_db.copy()
+        target.target_db.pop(2)
+
+        # Run validation
+        metrics2 = self.engine.seatbelt_check(source, target)
+
+        # Check metrics - expect pending change for ID 4
+        self.assertEqual(metrics2['source_size'], 2)
+        self.assertEqual(metrics2['target_size'], 2)
+        self.assertEqual(metrics2['pending_count'], 0)
+        self.assertEqual(metrics2['error_count'], 0)
 
     def test_save_load_shadow(self):
         """Test saving and loading the shadow file, verifying pending-to-error transition."""
