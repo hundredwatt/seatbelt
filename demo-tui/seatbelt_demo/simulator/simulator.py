@@ -9,7 +9,7 @@ from .metrics import MetricsTracker
 from .database import Database, SchemaDefinition, InitialData, ColumnDefinition
 from .corruptor import Corruptor
 from .etl import ETLProcessor
-from .validation import ValidationEngine
+from .validation import SimulationValidationEngine
 from .config import load_simulator_config, get_default_config, ConfigurationError, TRACING_IDS, load_tracing_ids_from_env
 
 class Simulator:
@@ -54,7 +54,7 @@ class Simulator:
         self.database = Database(random_seed, schema, initial_data)
         self.corruptor = Corruptor()
         self.etl_processor = ETLProcessor()
-        self.validation_engine = ValidationEngine()
+        self.validation_engine = SimulationValidationEngine()
         
         # Set up custom logger
         self.logger = logging.getLogger(__name__)
