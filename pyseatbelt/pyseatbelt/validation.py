@@ -12,6 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'reference'))
 from validation_logic import (
     Operation,
+    UTINYINT_TO_OPERATION,
     determine_source_operation,
     verify_row_integrity_from_incremental_checksums,
     check_for_validation_error
@@ -25,12 +26,39 @@ def format_target_for_validation(target_value: Any, target_type: Optional[str] =
 
 # Custom JSON encoder to handle date and datetime objects
 class CustomJSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder that can handle date and datetime objects."""
+    """Custom JSON encoder that can handle date and datetime objects and Operation enums."""
 
     def default(self, obj):
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
+        # Add handling for Operation enum values
+        if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Operation':
+            return {"__operation__": obj.value}
         return super().default(obj)
+
+# Custom object hook for JSON decoding to handle Operation enums and convert numeric keys
+def custom_json_decoder(obj):
+    # Handle numeric keys if this is the top-level object
+    if isinstance(obj, dict):
+        # Convert string keys to integers when they represent numbers
+        result = {}
+        for key, value in obj.items():
+            # Try to convert the key to int if it's a digit string
+            if isinstance(key, str) and key.isdigit():
+                result[int(key)] = value
+            else:
+                result[key] = value
+                
+        # Handle Operation enum values
+        if len(result) == 1 and "__operation__" in result:
+            try:
+                return UTINYINT_TO_OPERATION[result["__operation__"]]
+            except (KeyError, TypeError):
+                # If we can't convert it, just return the original object
+                return result
+        
+        return result
+    return obj
 
 class Source(ABC):
     """Abstract base class for data sources.
@@ -81,8 +109,8 @@ class Target(ABC):
 class ValidationEngine:
     """Class responsible for data validation between source and target."""
 
-    def __init__(self):
-        self.seatbelt = {}
+    def __init__(self, shadow_file: Optional[str] = None):
+        self.shadow = {}
         self.metrics = {
             'source_size': 0,
             'target_size': 0,
@@ -91,6 +119,34 @@ class ValidationEngine:
             'pending_count': 0,
             'valid_count': 0,
         }
+        
+        # Load shadow from file if provided
+        if shadow_file and os.path.exists(shadow_file):
+            try:
+                with open(shadow_file, 'r') as f:
+                    # Our custom_json_decoder will handle numeric keys and Operation enums
+                    self.shadow = json.load(f, object_hook=custom_json_decoder)
+                logging.info(f"Shadow loaded from {shadow_file} with {len(self.shadow)} entries")
+            except Exception as e:
+                logging.error(f"Failed to load shadow from {shadow_file}: {str(e)}")
+
+    def save_shadow(self, file_path: str) -> bool:
+        """Save the current shadow to a file.
+        
+        Args:
+            file_path: Path to save the shadow data
+            
+        Returns:
+            True if saving was successful, False otherwise
+        """
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(self.shadow, f, cls=CustomJSONEncoder, indent=2)
+            logging.info(f"Shadow saved to {file_path} with {len(self.shadow)} entries")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to save shadow to {file_path}: {str(e)}")
+            return False
 
     def seatbelt_check(self, source: Source, target: Target, column_names: List[str] = None):
         """Validate data between source and target.
@@ -119,7 +175,7 @@ class ValidationEngine:
         ids = set(source_db_signatures.keys()) | \
             set(target_db_signatures.keys()) | \
             set(incremental_computation.keys()) | \
-            set(self.seatbelt.keys())
+            set(self.shadow.keys())
 
         error_count = 0
         pending_count = 0
@@ -133,7 +189,7 @@ class ValidationEngine:
         for id in ids:
             source_signature = source_db_signatures.get(id, None)
             target_signature = target_db_signatures.get(id, None)
-            seatbelt_row = self.seatbelt.get(id, {})
+            seatbelt_row = self.shadow.get(id, {})
 
             # Get incremental hashes or reuse previous ones if not in current incremental computation
             incremental_hashes = incremental_computation.get(
@@ -170,7 +226,7 @@ class ValidationEngine:
                 pending |= not incremental_match and source_operation not in [Operation.DOES_NOT_EXIST, Operation.DELETE]
                 pending |= source_operation in [Operation.DOES_NOT_EXIST, Operation.DELETE] and target_operation not in [Operation.DOES_NOT_EXIST, Operation.DELETE]
 
-            self.seatbelt[id] = {
+            self.shadow[id] = {
                 'source_signature': source_signature,
                 'target_signature': target_signature,
                 'incremental_source_signature': incremental_hashes[0],
@@ -206,7 +262,7 @@ class ValidationEngine:
         self.metrics.update(
             source_size=len(source_db_signatures),
             target_size=len(target_db_signatures),
-            seatbelt_size=len(self.seatbelt),
+            seatbelt_size=len(self.shadow),
             error_count=error_count,
             pending_count=pending_count,
             valid_count=valid_count,

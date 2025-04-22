@@ -23,3 +23,5 @@ def load_tracing_ids_from_env():
             logging.warning(f"Error parsing TRACING_IDS environment variable: {e}")
             raise ConfigurationError(f"Error parsing TRACING_IDS environment variable: {e}")
     return TRACING_IDS
+
+load_tracing_ids_from_env()

@@ -1,16 +1,20 @@
 """Tests for the pyseatbelt validation engine."""
 
 import unittest
+import tempfile
+import os
+import logging
 from typing import List, Dict, Any, Tuple
 
 # Add reference directory to path for imports
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'reference'))
 
 # Import from our package
 from pyseatbelt.validation import Source, Target, ValidationEngine
 
+# Set up logging for this test module
+logger = logging.getLogger(__name__)
 
 class TestSource(Source):
     """Test implementation of Source for unit testing."""
@@ -173,6 +177,64 @@ class TestValidationEngine(unittest.TestCase):
         self.assertEqual(metrics['source_size'], 4)
         self.assertEqual(metrics['target_size'], 3)
         self.assertEqual(metrics['pending_count'], 1)
+
+    def test_save_load_shadow(self):
+        """Test saving and loading the shadow file, verifying pending-to-error transition."""
+        # Create a temporary file for testing
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            shadow_path = temp_file.name
+        
+        try:
+            # Setup: initial state with a new row that should be pending
+            initial_source = TestSource([
+                {'id': 1, 'name': 'John', 'age': 30},
+                {'id': 2, 'name': 'Jane', 'age': 25},
+                {'id': 3, 'name': 'Jim', 'age': 35},
+                {'id': 4, 'name': 'NewRow', 'age': 50},  # New row not in target
+            ])
+            initial_target = TestTarget([
+                {'id': 1, 'name': 'John', 'age': 30},
+                {'id': 2, 'name': 'Jane', 'age': 25},
+                {'id': 3, 'name': 'Jim', 'age': 35},
+                # ID 4 is not yet in target - this should be PENDING
+            ])
+            
+            # First run - should mark ID 4 as pending
+            engine1 = ValidationEngine()
+            metrics1 = engine1.seatbelt_check(initial_source, initial_target)
+            
+            # Verify ID 4 is pending
+            self.assertEqual(metrics1['pending_count'], 1)
+            self.assertEqual(metrics1['error_count'], 0)
+            
+            # Save the shadow state
+            engine1.save_shadow(shadow_path)
+            
+            # Now for the second run, simulate a long time passing
+            # Source still has ID 4, but we expect it to be an error now since
+            # it should have already propagated to the target
+            
+            # Load shadow from file
+            engine2 = ValidationEngine(shadow_file=shadow_path)
+            
+            # Use same source and target
+            metrics2 = engine2.seatbelt_check(initial_source, initial_target)
+            
+            # Now ID 4 should be an error because it's been in the shadow for "too long"
+            # and still hasn't appeared in the target
+            self.assertEqual(metrics2['error_count'], 1)
+            self.assertEqual(metrics2['pending_count'], 0)
+            
+            # Verify that shadow file was actually used by checking shadow data
+            # ID 4 should have these operations in the shadow
+            shadow_data = engine2.shadow[4]
+            self.assertIsNotNone(shadow_data)
+            self.assertEqual(shadow_data['validation_error'], True)
+            
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(shadow_path):
+                os.unlink(shadow_path)
 
 
 if __name__ == '__main__':
