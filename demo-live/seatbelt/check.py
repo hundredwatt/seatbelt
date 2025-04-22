@@ -10,15 +10,21 @@ import logging
 import time
 import pymysql
 import psycopg2
+import psycopg2.extras
 import hashlib
 from datetime import datetime
 from pathlib import Path
+from tabulate import tabulate
+from colorama import Fore, Style, init
+
+# Initialize colorama
+init()
 
 # Add pyseatbelt to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pyseatbelt'))
 
 # Import pyseatbelt classes
-from pyseatbelt.validation import Source, Target, ValidationEngine
+from pyseatbelt.validation import Source, Target, ValidationEngine, ValidationStatus, Operation
 from pyseatbelt.config import TRACING_IDS
 
 # Configure logging
@@ -154,6 +160,25 @@ class MysqlSource(Source):
         finally:
             cursor.close()
     
+    def get_row_data(self, row_id, column_names):
+        """Fetch a specific row from MySQL database."""
+        if not self.conn:
+            self.connect()
+            
+        cursor = self.conn.cursor(pymysql.cursors.DictCursor)
+        columns = ", ".join(column_names)
+        query = f"SELECT {columns} FROM demo_data WHERE id = %s"
+        
+        try:
+            cursor.execute(query, (row_id,))
+            result = cursor.fetchone()
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching row from MySQL: {str(e)}")
+            return None
+        finally:
+            cursor.close()
+    
     def close(self):
         """Close the MySQL connection."""
         if self.conn:
@@ -228,6 +253,25 @@ class PostgresTarget(Target):
         finally:
             cursor.close()
     
+    def get_row_data(self, row_id, column_names):
+        """Fetch a specific row from PostgreSQL database."""
+        if not self.conn:
+            self.connect()
+            
+        cursor = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        columns = ", ".join(column_names)
+        query = f"SELECT {columns} FROM sling.mysql_db_demo_data WHERE id = %s"
+        
+        try:
+            cursor.execute(query, (row_id,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Error fetching row from PostgreSQL: {str(e)}")
+            return None
+        finally:
+            cursor.close()
+    
     def close(self):
         """Close the PostgreSQL connection."""
         if self.conn:
@@ -236,6 +280,25 @@ class PostgresTarget(Target):
                 logger.debug("PostgreSQL connection closed")
             except Exception as e:
                 logger.warning(f"Error closing PostgreSQL connection: {str(e)}")
+
+
+def generate_diff(source_data, target_data):
+    """Generate a colored diff between source and target row data."""
+    if not source_data or not target_data:
+        return "Cannot generate diff: missing data"
+    
+    diff_lines = []
+    for key in sorted(set(list(source_data.keys()) + list(target_data.keys()))):
+        if key not in source_data:
+            diff_lines.append(f"{Fore.GREEN}+ {key}: {target_data[key]}{Style.RESET_ALL}")
+        elif key not in target_data:
+            diff_lines.append(f"{Fore.RED}- {key}: {source_data[key]}{Style.RESET_ALL}")
+        elif source_data[key] != target_data[key]:
+            diff_lines.append(f"{Fore.YELLOW}~ {key}:{Style.RESET_ALL}")
+            diff_lines.append(f"{Fore.RED}- {source_data[key]}{Style.RESET_ALL}")
+            diff_lines.append(f"{Fore.GREEN}+ {target_data[key]}{Style.RESET_ALL}")
+    
+    return "\n".join(diff_lines) if diff_lines else "No differences found"
 
 
 def main():
@@ -273,18 +336,84 @@ def main():
         # Save seatbelt_data to file
         engine.save_shadow(str(seatbelt_data_file))
         
-        # Print results
-        print()
-        print("Validation Results:")
-        print(f"Source size: {metrics['source_size']}")
-        print(f"Target size: {metrics['target_size']}")
-        print(f"Valid rows: {metrics['valid_count']}")
-        print(f"Pending rows: {metrics['pending_count']}")
-        print(f"Discrepant rows: {metrics['error_count']}")
+        # Print metrics as a table
+        print("\nValidation Results:")
+        metrics_table = [
+            ["Source size", metrics['source_size']],
+            ["Target size", metrics['target_size']],
+            ["Valid rows", metrics['valid_count']],
+            ["Pending rows", metrics['pending_count']],
+            ["Discrepant rows", f"{metrics['error_count']}{Fore.RED} ! {Style.RESET_ALL}" if metrics['error_count'] > 0 else metrics['error_count']]
+        ]
+        print(tabulate(metrics_table, tablefmt="grid"))
+        
+        # Categorize issues
+        source_only_ids = []
+        target_only_ids = []
+        drifted_ids = []
+        error_entries = {id: entry for id, entry in engine.shadow.items() if entry['validation_error'] == True}
+        
+        for id, entry in error_entries.items():
+            source_present = entry['source_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
+            target_present = entry['target_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
+            if source_present and target_present:
+                drifted_ids.append(id)
+            elif source_present:
+                source_only_ids.append(id)
+            elif target_present:
+                target_only_ids.append(id)
 
-        print()
-        print(f"Invalid row IDs: {[id for id, entry in engine.shadow.items() if entry['validation_error'] == True]}")
-
+        pending_ids = [id for id, entry in engine.shadow.items() if entry['validation_status'] == ValidationStatus.PENDING]
+        
+        # Build detailed table data
+        table_data = []
+        
+        # Add source only rows
+        for id in sorted(source_only_ids):
+            table_data.append([
+                id, 
+                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
+                "Source Only", 
+                ""
+            ])
+        
+        # Add target only rows
+        for id in sorted(target_only_ids):
+            table_data.append([
+                id, 
+                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
+                "Target Only", 
+                ""
+            ])
+        
+        # Add drifted rows with diff
+        for id in sorted(drifted_ids):
+            source_data = source.get_row_data(id, COLUMNS)
+            target_data = target.get_row_data(id, COLUMNS)
+            diff = generate_diff(source_data, target_data)
+            
+            table_data.append([
+                id, 
+                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
+                "Drifted", 
+                diff
+            ])
+        
+        # Add pending rows
+        for id in sorted(pending_ids):
+            table_data.append([
+                id, 
+                f"{Fore.YELLOW}PENDING{Style.RESET_ALL}", 
+                "", 
+                ""
+            ])
+        
+        if table_data:
+            print("\nRow Details:")
+            print(tabulate(table_data, headers=["ID", "Status", "Discrepancy Type", "Diff"], tablefmt="grid"))
+        else:
+            print("\nNo validation issues found!")
+        
         for id, entry in engine.shadow.items():
             if id in TRACING_IDS:
                 logger.info(f"ID: {id}")
