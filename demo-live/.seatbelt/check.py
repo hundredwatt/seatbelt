@@ -12,6 +12,8 @@ import pymysql
 import psycopg2
 import psycopg2.extras
 import hashlib
+import yaml
+import argparse
 from datetime import datetime
 from pathlib import Path
 from tabulate import tabulate
@@ -34,36 +36,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Load configuration from YAML file
+def load_config(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            logger.info(f"Loaded configuration from {config_path}")
+            return config
+    except Exception as e:
+        logger.error(f"Failed to load configuration: {str(e)}")
+        exit(1)
 
-# Database connection parameters from docker-compose.yml
-MYSQL_CONFIG = {
-    'host': 'localhost',
-    'port': 55800,
-    'user': 'mysqluser',
-    'password': 'mysqlpw',
-    'db': 'mysql_db'
-}
+# Parse command line arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description='Seatbelt validation script for checking data consistency.')
+    parser.add_argument('-c', '--config', dest='config_path', required=True,
+                        help='Path to the configuration file')
+    return parser.parse_args()
 
-POSTGRES_CONFIG = {
-    'host': 'localhost',
-    'port': 55802,
-    'user': 'postgres',
-    'password': 'postgres',
-    'dbname': 'sling'
-}
-
-# Column names to check - make sure these exist in both databases
-COLUMNS = ['name', 'score', 'price', 'temperature', 'timestamp', 'text', 'test_name']
-
+# Load configuration
+args = parse_args()
+CONFIG = load_config(args.config_path)
+MYSQL_CONFIG = CONFIG['source']
+POSTGRES_CONFIG = CONFIG['target']
+COLUMNS = CONFIG['validation']['columns']
+PRIMARY_KEY = CONFIG['validation']['primary_key']
 
 class MysqlSource(Source):
     """Implementation of Source for MySQL database."""
-    
+
     def __init__(self):
         """Initialize the MySQL source."""
         self.conn = None
         self.connect()
-    
+
     def connect(self):
         """Connect to the MySQL database."""
         try:
@@ -72,16 +78,16 @@ class MysqlSource(Source):
                 port=MYSQL_CONFIG['port'],
                 user=MYSQL_CONFIG['user'],
                 password=MYSQL_CONFIG['password'],
-                database=MYSQL_CONFIG['db']
+                database=MYSQL_CONFIG['database']
             )
             logger.info("Connected to MySQL source database")
         except Exception as e:
             logger.error(f"Failed to connect to MySQL: {str(e)}")
-            raise
-    
+            exit(1)
+
     def read_change_log_changes(self, column_names):
         """Read changes from the MySQL database.
-        
+
         For this implementation, we don't have a change log table, so we return an empty dictionary.
         In a real-world scenario, you might read from a CDC log or similar source.
         """
@@ -93,8 +99,8 @@ class MysqlSource(Source):
 
         # Use COALESCE to handle NULL values
         cols = ", ".join([f"COALESCE({col}, '')" for col in column_names])
-        query = f"SELECT id, {cols} FROM demo_data"
-        
+        query = f"SELECT {PRIMARY_KEY}, {cols} FROM {MYSQL_CONFIG['table']}"
+
         try:
             cursor.execute(query)
             for row in cursor.fetchall():
@@ -102,13 +108,13 @@ class MysqlSource(Source):
                     row_id = row[0]
                     column_values = row[1:]
                     source_signature = hashlib.md5(''.join(str(value) for value in column_values).encode()).hexdigest()[:16]
-                    
+
                     target_values = list(row[1:])
                     score_index = column_names.index('score')
                     # Only add '+' to exponents that don't already have a sign
                     target_values[score_index] = str(target_values[score_index]).replace('e', 'e+').replace('e+-', 'e-')
                     target_signature = hashlib.md5(''.join(str(value) for value in target_values).encode()).hexdigest()[:16]
-                    
+
                     signature_map[row_id] = (source_signature, target_signature)
 
                     if row_id in TRACING_IDS:
@@ -120,23 +126,23 @@ class MysqlSource(Source):
         except Exception as e:
             logger.error(f"Error reading change log from MySQL: {str(e)}")
             #return {}
-            raise e
+            exit(1)
         finally:
             cursor.close()
-    
+
     def read_signatures(self, column_names):
         """Read signatures from the MySQL database."""
         if not self.conn:
             self.connect()
-        
+
         signatures = {}
         cursor = self.conn.cursor()
-        
+
         # Build query selecting only the specified columns
         # Use COALESCE to handle NULL values
         cols = [f"COALESCE({col}, '')" for col in column_names]
         column_str = ', '.join(cols)
-        query = f"SELECT id, MD5(CONCAT({column_str})), CONCAT({column_str}) FROM demo_data"
+        query = f"SELECT {PRIMARY_KEY}, MD5(CONCAT({column_str})), CONCAT({column_str}) FROM {MYSQL_CONFIG['table']}"
         if any(TRACING_IDS):
             logger.info(f"[TRACE] query={query}")
 
@@ -150,25 +156,25 @@ class MysqlSource(Source):
 
                     if row_id in TRACING_IDS:
                         logger.info(f"[TRACE] id={row_id} mysql_signature={signature} column_str={row[2]}")
-                
+
             logger.debug(f"Read {len(signatures)} signatures from MySQL source")
             return signatures
         except Exception as e:
             logger.error(f"Error reading signatures from MySQL: {str(e)}")
             #return {}
-            raise e
+            exit(1)
         finally:
             cursor.close()
-    
+
     def get_row_data(self, row_id, column_names):
         """Fetch a specific row from MySQL database."""
         if not self.conn:
             self.connect()
-            
+
         cursor = self.conn.cursor(pymysql.cursors.DictCursor)
         columns = ", ".join(column_names)
-        query = f"SELECT {columns} FROM demo_data WHERE id = %s"
-        
+        query = f"SELECT {columns} FROM {MYSQL_CONFIG['table']} WHERE {PRIMARY_KEY} = %s"
+
         try:
             cursor.execute(query, (row_id,))
             result = cursor.fetchone()
@@ -178,7 +184,7 @@ class MysqlSource(Source):
             return None
         finally:
             cursor.close()
-    
+
     def close(self):
         """Close the MySQL connection."""
         if self.conn:
@@ -191,12 +197,12 @@ class MysqlSource(Source):
 
 class PostgresTarget(Target):
     """Implementation of Target for PostgreSQL database."""
-    
+
     def __init__(self):
         """Initialize the PostgreSQL target."""
         self.conn = None
         self.connect()
-    
+
     def connect(self):
         """Connect to the PostgreSQL database."""
         try:
@@ -205,34 +211,34 @@ class PostgresTarget(Target):
                 port=POSTGRES_CONFIG['port'],
                 user=POSTGRES_CONFIG['user'],
                 password=POSTGRES_CONFIG['password'],
-                dbname=POSTGRES_CONFIG['dbname']
+                dbname=POSTGRES_CONFIG['database']
             )
             logger.info("Connected to PostgreSQL target database")
         except Exception as e:
             logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
-            raise
-    
+            exit(1)
+
     def read_signatures(self, column_names):
         """Read signatures from the PostgreSQL database."""
         if not self.conn:
             self.connect()
-        
+
         signatures = {}
         cursor = self.conn.cursor()
-        
+
         # Build query selecting only the specified columns
-        # The target table in PostgreSQL is in the 'sling' schema with '{stream_schema}_{stream_table}' naming
+        # The target table in PostgreSQL is in the specified schema
         # Use COALESCE to handle NULL values
         pg_types = {
             'score': 'real::text',
         }
         cols = [f"COALESCE({col}::{pg_types.get(col, 'text')}, '')" for col in column_names]
         column_str = ' || '.join(cols)
-        # Adjusted for PostgreSQL table naming convention
-        query = f"SELECT id, MD5({column_str}), {column_str} FROM sling.mysql_db_demo_data"
+        # Use the schema and table from config
+        query = f"SELECT {PRIMARY_KEY}, MD5({column_str}), {column_str} FROM {POSTGRES_CONFIG['schema']}.{POSTGRES_CONFIG['table']}"
         if any(TRACING_IDS):
             logger.info(f"[TRACE] query={query}")
-        
+
         try:
             cursor.execute(query)
             for row in cursor.fetchall():
@@ -243,25 +249,25 @@ class PostgresTarget(Target):
 
                     if row_id in TRACING_IDS:
                         logger.info(f"[TRACE] id={row_id} postgres_signature={signature} column_str={row[2]}")
-                
+
             logger.debug(f"Read {len(signatures)} signatures from PostgreSQL target")
             return signatures
         except Exception as e:
             logger.error(f"Error reading signatures from PostgreSQL: {str(e)}")
             #return {}
-            raise e
+            exit(1)
         finally:
             cursor.close()
-    
+
     def get_row_data(self, row_id, column_names):
         """Fetch a specific row from PostgreSQL database."""
         if not self.conn:
             self.connect()
-            
+
         cursor = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         columns = ", ".join(column_names)
-        query = f"SELECT {columns} FROM sling.mysql_db_demo_data WHERE id = %s"
-        
+        query = f"SELECT {columns} FROM {POSTGRES_CONFIG['schema']}.{POSTGRES_CONFIG['table']} WHERE {PRIMARY_KEY} = %s"
+
         try:
             cursor.execute(query, (row_id,))
             result = cursor.fetchone()
@@ -271,7 +277,7 @@ class PostgresTarget(Target):
             return None
         finally:
             cursor.close()
-    
+
     def close(self):
         """Close the PostgreSQL connection."""
         if self.conn:
@@ -286,7 +292,7 @@ def generate_diff(source_data, target_data):
     """Generate a colored diff between source and target row data."""
     if not source_data or not target_data:
         return "Cannot generate diff: missing data"
-    
+
     diff_lines = []
     for key in sorted(set(list(source_data.keys()) + list(target_data.keys()))):
         if key not in source_data:
@@ -297,7 +303,7 @@ def generate_diff(source_data, target_data):
             diff_lines.append(f"{Fore.YELLOW}~ {key}:{Style.RESET_ALL}")
             diff_lines.append(f"{Fore.RED}- {source_data[key]}{Style.RESET_ALL}")
             diff_lines.append(f"{Fore.GREEN}+ {target_data[key]}{Style.RESET_ALL}")
-    
+
     return "\n".join(diff_lines) if diff_lines else "No differences found"
 
 
@@ -306,16 +312,17 @@ def main():
     # Create seatbelt data directory if it doesn't exist
     seatbelt_data_dir = Path("data/seatbelt")
     seatbelt_data_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Generate seatbelt data file path with timestamp
+    config_file_hash = hashlib.md5(args.config_path.encode()).hexdigest()[:16]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    seatbelt_data_file = seatbelt_data_dir / f"seatbelt_{timestamp}.json"
-    
+    seatbelt_data_file = seatbelt_data_dir / f"seatbelt_{config_file_hash}_{timestamp}.dat"
+
     # Create validation engine
     # Check if previous seatbelt data file exists and load it
-    previous_seatbelt_data_files = list(seatbelt_data_dir.glob("seatbelt_*.json"))
+    previous_seatbelt_data_files = list(seatbelt_data_dir.glob(f"seatbelt_{config_file_hash}_*.dat"))
     previous_seatbelt_data_file = max(previous_seatbelt_data_files, default=None, key=lambda x: x.stat().st_mtime)
-    
+
     engine = None
     if previous_seatbelt_data_file:
         logger.info(f"Loading previous seatbelt file")
@@ -323,19 +330,19 @@ def main():
     else:
         logger.info("No previous seatbelt file found, starting fresh")
         engine = ValidationEngine()
-    
+
     # Create source and target
     source = MysqlSource()
     target = PostgresTarget()
-    
+
     try:
         # Run validation
         logger.info("Running seatbelt validation...")
         metrics = engine.seatbelt_check(source, target, column_names=COLUMNS)
-        
+
         # Save seatbelt_data to file
         engine.save_shadow(str(seatbelt_data_file))
-        
+
         # Print metrics as a table
         print("\nValidation Results:")
         metrics_table = [
@@ -346,13 +353,13 @@ def main():
             ["Discrepant rows", f"{metrics['error_count']}{Fore.RED} ! {Style.RESET_ALL}" if metrics['error_count'] > 0 else metrics['error_count']]
         ]
         print(tabulate(metrics_table, tablefmt="grid"))
-        
+
         # Categorize issues
         source_only_ids = []
         target_only_ids = []
         drifted_ids = []
         error_entries = {id: entry for id, entry in engine.shadow.items() if entry['validation_error'] == True}
-        
+
         for id, entry in error_entries.items():
             source_present = entry['source_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
             target_present = entry['target_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
@@ -364,65 +371,64 @@ def main():
                 target_only_ids.append(id)
 
         pending_ids = [id for id, entry in engine.shadow.items() if entry['validation_status'] == ValidationStatus.PENDING]
-        
+
         # Build detailed table data
         table_data = []
-        
+
         # Add source only rows
         for id in sorted(source_only_ids):
             table_data.append([
-                id, 
-                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
-                "Source Only", 
+                id,
+                f"{Fore.RED}ERROR{Style.RESET_ALL}",
+                "Source Only",
                 ""
             ])
-        
+
         # Add target only rows
         for id in sorted(target_only_ids):
             table_data.append([
-                id, 
-                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
-                "Target Only", 
+                id,
+                f"{Fore.RED}ERROR{Style.RESET_ALL}",
+                "Target Only",
                 ""
             ])
-        
+
         # Add drifted rows with diff
         for id in sorted(drifted_ids):
             source_data = source.get_row_data(id, COLUMNS)
             target_data = target.get_row_data(id, COLUMNS)
             diff = generate_diff(source_data, target_data)
-            
+
             table_data.append([
-                id, 
-                f"{Fore.RED}ERROR{Style.RESET_ALL}", 
-                "Drifted", 
+                id,
+                f"{Fore.RED}ERROR{Style.RESET_ALL}",
+                "Drifted",
                 diff
             ])
-        
+
         # Add pending rows
         for id in sorted(pending_ids):
             table_data.append([
-                id, 
-                f"{Fore.YELLOW}PENDING{Style.RESET_ALL}", 
-                "", 
+                id,
+                f"{Fore.YELLOW}IN-FLIGHT{Style.RESET_ALL}",
+                "",
                 ""
             ])
-        
+
         if table_data:
             print("\nRow Details:")
             print(tabulate(table_data, headers=["ID", "Status", "Discrepancy Type", "Diff"], tablefmt="grid"))
         else:
             print("\nNo validation issues found!")
-        
+
         for id, entry in engine.shadow.items():
             if id in TRACING_IDS:
                 logger.info(f"ID: {id}")
                 logger.info(f"Entry: {entry}")
-        
+
         return 0
     except Exception as e:
         logger.error(f"Validation failed: {str(e)}")
-        raise e
     finally:
         # Clean up connections
         source.close()

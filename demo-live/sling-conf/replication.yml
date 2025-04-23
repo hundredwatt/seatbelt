@@ -10,4 +10,3 @@ streams:
 
 env:
   SLING_THREADS: 1
-

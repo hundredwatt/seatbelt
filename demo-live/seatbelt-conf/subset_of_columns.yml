@@ -1,0 +1,29 @@
+# Seatbelt Configuration
+
+# Database connections
+source:
+  type: mysql
+  host: localhost
+  port: 55800
+  user: mysqluser
+  password: mysqlpw
+  database: mysql_db
+  table: demo_data
+
+target:
+  type: postgresql
+  host: localhost
+  port: 55802
+  user: postgres
+  password: postgres
+  database: sling
+  schema: sling
+  table: mysql_db_demo_data
+
+# Validation configuration
+validation:
+  primary_key: id
+  columns:
+    - name
+    - score
+    - test_name

@@ -7,7 +7,7 @@ mysql:
 	docker exec -it mysql_source mysql -u mysqluser -pmysqlpw -D mysql_db
 
 sling_run:
-	sling run -r sling-conf/replication.yml 2>&1 | tee -a data/sling/sling.log
+	set -o pipefail; sling run -r sling-conf/replication.yml 2>&1 | tee -a data/sling/sling.log
 	@if [ $$? -eq 0 ]; then \
 		mkdir -p data/sling && touch data/sling/last_succeeded; \
 	fi
@@ -17,8 +17,7 @@ seatbelt_check:
 		echo "Error: Sling must succeed before seatbelt can run again."; \
 		exit 1; \
 	fi
-	@echo "./seatbelt -r sling-conf/replication.yml"
-	@python3 seatbelt/check.py
+	set -o pipefail; ./bin/seatbelt -c $${CONFIG_FILE:-seatbelt-conf/default.yml} 2>&1 | tee -a data/seatbelt/seatbelt.log
 	@if [ $$? -eq 0 ]; then \
 		mkdir -p data/seatbelt && touch data/seatbelt/last_succeeded; \
 	fi
