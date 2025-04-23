@@ -272,6 +272,177 @@ class TestValidationEngine(unittest.TestCase):
             if os.path.exists(shadow_path):
                 os.unlink(shadow_path)
 
+    def test_partitioning(self):
+        """Test validation with partitioning enabled."""
+        # Create a source with IDs that will end up in different partitions
+        source = TestSource([
+            {'id': 1, 'name': 'John', 'age': 30},   # Mod 3 = 1
+            {'id': 2, 'name': 'Jane', 'age': 25},   # Mod 3 = 2
+            {'id': 3, 'name': 'Jim', 'age': 35},    # Mod 3 = 0
+            {'id': 4, 'name': 'Janet', 'age': 40},  # Mod 3 = 1
+            {'id': 5, 'name': 'Jack', 'age': 45},   # Mod 3 = 2
+            {'id': 6, 'name': 'Jill', 'age': 50},   # Mod 3 = 0
+        ])
+        
+        # Create a matching target
+        target = TestTarget([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+            {'id': 4, 'name': 'Janet', 'age': 40},
+            {'id': 5, 'name': 'Jack', 'age': 45},
+            {'id': 6, 'name': 'Jill', 'age': 50},
+        ])
+        
+        # Introduce an error for ID 5 (which is in partition 2)
+        target.target_db[4]['age'] = 46
+        
+        # Run validation with partition 0 (should include IDs 3 and 6)
+        metrics_p0 = self.engine.seatbelt_check(source, target, partitions=3, current_partition=0)
+        
+        # Check that only partition 0 rows are in the shadow
+        self.assertEqual(len(self.engine.shadow), 2)
+        self.assertIn(3, self.engine.shadow)
+        self.assertIn(6, self.engine.shadow)
+        self.assertEqual(metrics_p0['seatbelt_size'], 2)
+        self.assertEqual(metrics_p0['valid_count'], 2)
+        
+        # Reset engine and run with partition 1 (should include IDs 1 and 4)
+        self.engine = ValidationEngine()
+        metrics_p1 = self.engine.seatbelt_check(source, target, partitions=3, current_partition=1)
+        
+        # Check that only partition 1 rows are in the shadow
+        self.assertEqual(len(self.engine.shadow), 2)
+        self.assertIn(1, self.engine.shadow)
+        self.assertIn(4, self.engine.shadow)
+        self.assertEqual(metrics_p1['seatbelt_size'], 2)
+        self.assertEqual(metrics_p1['valid_count'], 2)
+        
+        # Reset engine and run with partition 2 (should include IDs 2 and 5)
+        self.engine = ValidationEngine()
+        metrics_p2 = self.engine.seatbelt_check(source, target, partitions=3, current_partition=2)
+        
+        # Check that only partition 2 rows are in the shadow and ID 5 has an error
+        self.assertEqual(len(self.engine.shadow), 2)
+        self.assertIn(2, self.engine.shadow)
+        self.assertIn(5, self.engine.shadow)
+        self.assertEqual(metrics_p2['seatbelt_size'], 2)
+        self.assertEqual(metrics_p2['valid_count'], 1)  # Only ID 2 should be valid
+        self.assertEqual(metrics_p2['pending_count'], 1)  # ID 5 should be pending due to age difference
+
+    def test_id_range_filtering(self):
+        """Test validation with ID range filtering."""
+        # Create a source with a range of IDs
+        source = TestSource([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+            {'id': 4, 'name': 'Janet', 'age': 40},
+            {'id': 5, 'name': 'Jack', 'age': 45},
+            {'id': 6, 'name': 'Jill', 'age': 50},
+        ])
+        
+        # Create a matching target with an error for ID 5
+        target = TestTarget([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+            {'id': 4, 'name': 'Janet', 'age': 40},
+            {'id': 5, 'name': 'Jack', 'age': 46},  # Error in age
+            {'id': 6, 'name': 'Jill', 'age': 50},
+        ])
+        
+        # Test with minimum range only (ID >= 3)
+        self.engine = ValidationEngine()
+        metrics_min = self.engine.seatbelt_check(source, target, id_range=(3, None))
+        
+        # Check that only IDs >= 3 are in the shadow
+        self.assertEqual(len(self.engine.shadow), 4)
+        for id in [3, 4, 5, 6]:
+            self.assertIn(id, self.engine.shadow)
+        for id in [1, 2]:
+            self.assertNotIn(id, self.engine.shadow)
+        self.assertEqual(metrics_min['seatbelt_size'], 4)
+        self.assertEqual(metrics_min['pending_count'], 1)  # ID 5 has an error
+        
+        # Test with maximum range only (ID < 5)
+        self.engine = ValidationEngine()
+        metrics_max = self.engine.seatbelt_check(source, target, id_range=(None, 5))
+        
+        # Check that only IDs < 5 are in the shadow
+        self.assertEqual(len(self.engine.shadow), 4)
+        for id in [1, 2, 3, 4]:
+            self.assertIn(id, self.engine.shadow)
+        for id in [5, 6]:
+            self.assertNotIn(id, self.engine.shadow)
+        self.assertEqual(metrics_max['seatbelt_size'], 4)
+        self.assertEqual(metrics_max['valid_count'], 4)  # All rows should be valid
+        
+        # Test with both min and max (3 <= ID < 6)
+        self.engine = ValidationEngine()
+        metrics_range = self.engine.seatbelt_check(source, target, id_range=(3, 6))
+        
+        # Check that only IDs in range are in the shadow
+        self.assertEqual(len(self.engine.shadow), 3)
+        for id in [3, 4, 5]:
+            self.assertIn(id, self.engine.shadow)
+        for id in [1, 2, 6]:
+            self.assertNotIn(id, self.engine.shadow)
+        self.assertEqual(metrics_range['seatbelt_size'], 3)
+        self.assertEqual(metrics_range['pending_count'], 1)  # ID 5 has an error
+
+    def test_combined_criteria_precedence(self):
+        """Test that ID range filtering is properly applied at the shadow level."""
+        # Create a source with various IDs for testing range filtering
+        source = TestSource([
+            {'id': 1, 'name': 'John', 'age': 30},
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+            {'id': 10, 'name': 'Janet', 'age': 40},
+            {'id': 11, 'name': 'Jack', 'age': 45},
+            {'id': 12, 'name': 'Jill', 'age': 50},
+        ])
+        
+        # Create a target with an intentional mismatch
+        target = TestTarget([
+            {'id': 1, 'name': 'John', 'age': 31},  # Age mismatch  
+            {'id': 2, 'name': 'Jane', 'age': 25},
+            {'id': 3, 'name': 'Jim', 'age': 35},
+            {'id': 10, 'name': 'Janet', 'age': 40},
+            {'id': 11, 'name': 'Jack', 'age': 46},  # Age mismatch
+            {'id': 12, 'name': 'Jill', 'age': 50},
+        ])
+        
+        # Initialize the engine with some pre-existing shadow data
+        # This simulates a previous run
+        self.engine.shadow = {
+            1: {'validation_error': True},  #  Will not be updated
+            2: {'validation_error': True},  #  Will not be updated - even though error fixed
+            3: {'validation_error': False},  # Will be kept by range
+            5: {'validation_error': False},   # Will be removed - not in source or target
+            11: {'validation_error': False}  # Will be kept by range
+        }
+        
+        # Run validation with ID range 3-12
+        metrics = self.engine.seatbelt_check(source, target, id_range=(3, 13))
+        
+        # Check that shadow is correctly updated:
+        # - ID 1 should be in the shadow, but not updated
+        # - ID 5 should be gone (not in source or target)
+        # - IDs 3, 10, 11, 12 should be present (in range)
+        print(self.engine.shadow.keys())
+        self.assertEqual(len(self.engine.shadow), 6)
+        self.assertNotIn(5, self.engine.shadow)
+        for id in [1, 2]:
+            self.assertIn(id, self.engine.shadow)
+            self.assertFalse('validation_status' in self.engine.shadow[id]) # Not updated
+        for id in [3, 10, 11, 12]:
+            self.assertIn(id, self.engine.shadow)
+            self.assertTrue('validation_status' in self.engine.shadow[id]) # Updated
+
+        # ID 11 should have a pending status due to the age mismatch
+        self.assertEqual(metrics['pending_count'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -170,13 +170,18 @@ class ValidationEngine:
             logging.error(f"Failed to save seatbelt data to {file_path}: {str(e)}")
             return False
 
-    def seatbelt_check(self, source: Source, target: Target, column_names: List[str] = None):
+    def seatbelt_check(self, source: Source, target: Target, column_names: List[str] = None, 
+                       partitions: Optional[int] = None, current_partition: Optional[int] = None,
+                       id_range: Optional[Tuple[Optional[int], Optional[int]]] = None):
         """Validate data between source and target.
         
         Args:
             source: Source instance to validate from
             target: Target instance to validate against
             column_names: Optional list of column names to include in validation
+            partitions: Optional number of partitions to use
+            current_partition: Optional current partition number (0-based)
+            id_range: Optional tuple of (min_id, max_id) to limit the validation range
             
         Returns:
             Dictionary containing validation metrics
@@ -209,6 +214,16 @@ class ValidationEngine:
         stale_ids = []
 
         for id in ids:
+            # Skip rows that are not in the current partition
+            if partitions is not None and id % partitions != current_partition:
+                continue
+                
+            # Skip rows outside the specified ID range
+            if id_range is not None:
+                min_id, max_id = id_range
+                if (min_id is not None and id < min_id) or (max_id is not None and id >= max_id):
+                    continue
+                
             source_signature = source_db_signatures.get(id, None)
             target_signature = target_db_signatures.get(id, None)
             seatbelt_row = self.shadow.get(id, {})

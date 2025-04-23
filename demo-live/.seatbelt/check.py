@@ -20,7 +20,7 @@ from tabulate import tabulate
 from colorama import Fore, Style, init
 
 # Initialize colorama
-init()
+init(strip=False, autoreset=True)
 
 # Add pyseatbelt to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pyseatbelt'))
@@ -47,12 +47,47 @@ def load_config(config_path):
         logger.error(f"Failed to load configuration: {str(e)}")
         exit(1)
 
+# Parse a range argument in format "min,max"
+def parse_range(range_str):
+    try:
+        if not range_str:
+            return None
+            
+        parts = range_str.split(',')
+        if len(parts) != 2:
+            raise ValueError("Range must be in format 'min,max'")
+            
+        min_val = int(parts[0]) if parts[0].strip() else None
+        max_val = int(parts[1]) if parts[1].strip() else None
+        
+        return (min_val, max_val)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid range format: {str(e)}")
+
 # Parse command line arguments
 def parse_args():
     parser = argparse.ArgumentParser(description='Seatbelt validation script for checking data consistency.')
     parser.add_argument('-c', '--config', dest='config_path', required=True,
                         help='Path to the configuration file')
-    return parser.parse_args()
+    parser.add_argument('-p', '--partitions', type=int, help='Number of partitions to use')
+    parser.add_argument('-n', type=int, help='Current partition number (0-based)')
+    parser.add_argument('--range', type=parse_range, 
+                        help='ID range to check in format "min,max" (inclusive min, exclusive max)')
+    
+    args = parser.parse_args()
+    
+    # Validate partition arguments
+    if args.partitions is not None:
+        if args.n is None:
+            parser.error("When using -p/--partitions, -n must also be specified")
+        if args.n < 0 or args.n >= args.partitions:
+            parser.error(f"Partition number -n must be between 0 and {args.partitions - 1}")
+    
+    # Validate that partitions and range are not both specified
+    if args.partitions is not None and args.range is not None:
+        parser.error("Cannot specify both --partitions and --range")
+    
+    return args
 
 # Load configuration
 args = parse_args()
@@ -61,6 +96,9 @@ MYSQL_CONFIG = CONFIG['source']
 POSTGRES_CONFIG = CONFIG['target']
 COLUMNS = CONFIG['validation']['columns']
 PRIMARY_KEY = CONFIG['validation']['primary_key']
+PARTITIONS = args.partitions
+CURRENT_PARTITION = args.n
+ID_RANGE = args.range
 
 class MysqlSource(Source):
     """Implementation of Source for MySQL database."""
@@ -100,9 +138,32 @@ class MysqlSource(Source):
         # Use COALESCE to handle NULL values
         cols = ", ".join([f"COALESCE({col}, '')" for col in column_names])
         query = f"SELECT {PRIMARY_KEY}, {cols} FROM {MYSQL_CONFIG['table']}"
-
+        
+        # Add where clause
+        where_clauses = []
+        params = []
+        
+        # Add partition filter if partitions are configured
+        if PARTITIONS is not None:
+            where_clauses.append(f"MOD({PRIMARY_KEY}, %s) = %s")
+            params.extend([PARTITIONS, CURRENT_PARTITION])
+        
+        # Add range filter if range is configured
+        if ID_RANGE is not None:
+            min_id, max_id = ID_RANGE
+            if min_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} >= %s")
+                params.append(min_id)
+            if max_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} < %s")
+                params.append(max_id)
+        
+        # Combine where clauses if any
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+            
         try:
-            cursor.execute(query)
+            cursor.execute(query, params)
             for row in cursor.fetchall():
                 if row and row[0] is not None:
                     row_id = row[0]
@@ -143,11 +204,35 @@ class MysqlSource(Source):
         cols = [f"COALESCE({col}, '')" for col in column_names]
         column_str = ', '.join(cols)
         query = f"SELECT {PRIMARY_KEY}, MD5(CONCAT({column_str})), CONCAT({column_str}) FROM {MYSQL_CONFIG['table']}"
+        
+        # Add where clause
+        where_clauses = []
+        params = []
+        
+        # Add partition filter if partitions are configured
+        if PARTITIONS is not None:
+            where_clauses.append(f"MOD({PRIMARY_KEY}, %s) = %s")
+            params.extend([PARTITIONS, CURRENT_PARTITION])
+        
+        # Add range filter if range is configured
+        if ID_RANGE is not None:
+            min_id, max_id = ID_RANGE
+            if min_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} >= %s")
+                params.append(min_id)
+            if max_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} < %s")
+                params.append(max_id)
+        
+        # Combine where clauses if any
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+            
         if any(TRACING_IDS):
-            logger.info(f"[TRACE] query={query}")
+            logger.info(f"[TRACE] query={query}, params={params}")
 
         try:
-            cursor.execute(query)
+            cursor.execute(query, params)
             for row in cursor.fetchall():
                 if row[0] is not None and row[1] is not None:
                     row_id = row[0]
@@ -181,7 +266,7 @@ class MysqlSource(Source):
             return result
         except Exception as e:
             logger.error(f"Error fetching row from MySQL: {str(e)}")
-            return None
+            exit(1)
         finally:
             cursor.close()
 
@@ -236,11 +321,35 @@ class PostgresTarget(Target):
         column_str = ' || '.join(cols)
         # Use the schema and table from config
         query = f"SELECT {PRIMARY_KEY}, MD5({column_str}), {column_str} FROM {POSTGRES_CONFIG['schema']}.{POSTGRES_CONFIG['table']}"
+        
+        # Add where clause
+        where_clauses = []
+        params = []
+        
+        # Add partition filter if partitions are configured
+        if PARTITIONS is not None:
+            where_clauses.append(f"MOD({PRIMARY_KEY}, %s) = %s")
+            params.extend([PARTITIONS, CURRENT_PARTITION])
+        
+        # Add range filter if range is configured
+        if ID_RANGE is not None:
+            min_id, max_id = ID_RANGE
+            if min_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} >= %s")
+                params.append(min_id)
+            if max_id is not None:
+                where_clauses.append(f"{PRIMARY_KEY} < %s")
+                params.append(max_id)
+        
+        # Combine where clauses if any
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+            
         if any(TRACING_IDS):
-            logger.info(f"[TRACE] query={query}")
+            logger.info(f"[TRACE] query={query}, params={params}")
 
         try:
-            cursor.execute(query)
+            cursor.execute(query, params)
             for row in cursor.fetchall():
                 if row[0] is not None and row[1] is not None:
                     row_id = row[0]
@@ -338,7 +447,14 @@ def main():
     try:
         # Run validation
         logger.info("Running seatbelt validation...")
-        metrics = engine.seatbelt_check(source, target, column_names=COLUMNS)
+        metrics = engine.seatbelt_check(
+            source, 
+            target, 
+            column_names=COLUMNS,
+            partitions=PARTITIONS,
+            current_partition=CURRENT_PARTITION,
+            id_range=ID_RANGE
+        )
 
         # Save seatbelt_data to file
         engine.save_shadow(str(seatbelt_data_file))
@@ -361,6 +477,14 @@ def main():
         error_entries = {id: entry for id, entry in engine.shadow.items() if entry['validation_error'] == True}
 
         for id, entry in error_entries.items():
+            if PARTITIONS is not None:
+                if id % PARTITIONS != CURRENT_PARTITION:
+                    continue
+            
+            if ID_RANGE is not None:
+                if id < ID_RANGE[0] or id >= ID_RANGE[1]:
+                    continue
+
             source_present = entry['source_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
             target_present = entry['target_operation'] not in [Operation.DELETE, Operation.DOES_NOT_EXIST]
             if source_present and target_present:
@@ -429,6 +553,7 @@ def main():
         return 0
     except Exception as e:
         logger.error(f"Validation failed: {str(e)}")
+        exit(1)
     finally:
         # Clean up connections
         source.close()

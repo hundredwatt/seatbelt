@@ -2,70 +2,16 @@
 
 set -e
 
-export DOCKER_CLI_HINTS=false
+# Source common functions
+source "$(dirname "$0")/_common.sh"
 
-BOLD_WHITE=$(tput bold)$(tput setaf 7)
-RESET=$(tput sgr0)
+# Main script
+ensure_services_up
 
-print_heading() {
-  echo ""
-  echo "${BOLD_WHITE}$1${RESET}"
-}
+# Prepare databases with specific config
+prepare_databases "seatbelt-conf/subset_of_columns.yml"
 
-pause() {
-  echo ""
-  read -p "Press any key to continue..."
-}
-
-check_services() {
-  echo "Checking if all services are up and healthy..."
-  
-  # Get all services that should be running
-  services=$(docker compose ps --services)
-
-  # Check if services list is empty
-  if [ -z "$services" ]; then
-    echo "ERROR: No services found in docker-compose.yml"
-    return 1
-  fi
-  
-  for service in $services; do
-    # Check if service is running and healthy
-    status=$(docker compose ps --format json $service | grep -o '"State":"[^"]*"' | cut -d'"' -f4)
-    health=$(docker compose ps --format json $service | grep -o '"Health":"[^"]*"' | cut -d'"' -f4)
-    
-    echo "Service $service: Status=$status, Health=$health"
-    
-    # Check if service is running
-    if [ "$status" != "running" ]; then
-      echo "ERROR: Service $service is not running (status: $status)"
-      return 1
-    fi
-    
-    # If health check is available, check if service is healthy
-    if [ ! -z "$health" ] && [ "$health" != "healthy" ]; then
-      echo "ERROR: Service $service is not healthy (health: $health)"
-      return 1
-    fi
-  done
-  
-  echo "All services are up and healthy!"
-  return 0
-}
-
-
-print_heading "0. Ensure databases are up"
-check_services
-pause
-
-print_heading "1. Prepare by syncing and verifying with seatbelt"
-make seatbelt_reset
-make sling_run
-make seatbelt_check CONFIG_FILE=seatbelt-conf/subset_of_columns.yml
-touch data/sling/last_succeeded # ensure we can run seatbelt again
-pause
-
-print_heading "2. Insert 2 rows with errors - 1 in an included column, 1 in an excluded column"
+print_heading "2. Insert 2 rows with errors - 1 in an included column (score), 1 in an excluded column (price)"
 # Insert a row and capture the ID
 echo 'mysql -u mysqluser -pmysqlpw -D mysql_db -e "INSERT INTO mysql_db.demo_data (test_name, name, score, price) VALUES ('subset_of_columns-included', 'Joe', 100, 51.22); SELECT LAST_INSERT_ID() as id;"'
 echo 'mysql -u mysqluser -pmysqlpw -D mysql_db -e "INSERT INTO mysql_db.demo_data (test_name, name, score, price) VALUES ('subset_of_columns-excluded', 'Jane', 101, 82.01); SELECT LAST_INSERT_ID() as id;"'
@@ -78,7 +24,7 @@ print_heading "3. Run seatbelt check again - should see 2 in-flight rows"
 make seatbelt_check CONFIG_FILE=seatbelt-conf/subset_of_columns.yml
 pause
 
-print_heading "4. Sync the rows to the target, then corrupt the rows"
+print_heading "4. Sync the rows to the target, then corrupt the rows (score for included, price for excluded)"
 make sling_run
 echo 'psql -U postgres -d sling -c "UPDATE sling.mysql_db_demo_data SET score = 1337 WHERE id = $included_id;"'
 docker exec -it postgres_sink psql -U postgres -d sling -c "UPDATE sling.mysql_db_demo_data SET score = 1337 WHERE id = $included_id;"
@@ -86,6 +32,6 @@ echo 'psql -U postgres -d sling -c "UPDATE sling.mysql_db_demo_data SET price = 
 docker exec -it postgres_sink psql -U postgres -d sling -c "UPDATE sling.mysql_db_demo_data SET price = 13.37 WHERE id = $excluded_id;"
 pause
 
-print_heading "5. Run seatbelt check again - should see 1 error for the included column, 1 for the excluded column"
+print_heading "5. Run seatbelt check again - should see 1 error for the row with corrupted score, but no error for the row with corrupted price"
 make seatbelt_check CONFIG_FILE=seatbelt-conf/subset_of_columns.yml
 pause

@@ -17,7 +17,7 @@ seatbelt_check:
 		echo "Error: Sling must succeed before seatbelt can run again."; \
 		exit 1; \
 	fi
-	set -o pipefail; ./bin/seatbelt -c $${CONFIG_FILE:-seatbelt-conf/default.yml} 2>&1 | tee -a data/seatbelt/seatbelt.log
+	set -o pipefail; ./bin/seatbelt -c $${CONFIG_FILE:-seatbelt-conf/default.yml} $${SEATBELT_ARGS} 2>&1 | tee -a data/seatbelt/seatbelt.log
 	@if [ $$? -eq 0 ]; then \
 		mkdir -p data/seatbelt && touch data/seatbelt/last_succeeded; \
 	fi
