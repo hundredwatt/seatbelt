@@ -262,6 +262,11 @@ class ValidationEngine:
             if id in TRACING_IDS:
                 logging.info(f"[TRACE] SEATBELT CHECK: id={id}, validation_status={status}, source_operation={source_operation}, previous_source_operation={previous_source_operation}, target_operation={target_operation}, previous_target_operation={previous_target_operation}, previous_error={previous_error}, error={error}, incremental_match={incremental_match}")
 
+            if status == ValidationStatus.GONE:
+                if id in self.shadow:
+                    del self.shadow[id]
+                continue
+
             self.shadow[id] = {
                 'source_signature': source_signature,
                 'target_signature': target_signature,

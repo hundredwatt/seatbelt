@@ -211,6 +211,9 @@ class TestValidationEngine(unittest.TestCase):
         self.assertEqual(metrics2['pending_count'], 0)
         self.assertEqual(metrics2['error_count'], 0)
 
+        # Gone entry removed from shadow
+        self.assertNotIn(3, self.engine.shadow)
+
     def test_save_load_shadow(self):
         """Test saving and loading the shadow file, verifying pending-to-error transition."""
         # Create a temporary file for testing
