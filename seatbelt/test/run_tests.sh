@@ -7,22 +7,24 @@ if [ ! -f go.mod ]; then
     exit 1
 fi
 
-# Navigate to the parent test directory for docker-compose context
-cd ../test
+# Navigate to the test directory for docker-compose context
+cd test
 
 # Stop and remove existing containers
 echo "Cleaning up existing containers..."
 docker-compose down
 
-# Remove PostgreSQL data to ensure clean slate with new configuration
+# Remove PostgreSQL and ClickHouse data to ensure clean slate
 echo "Removing existing PostgreSQL data..."
 rm -rf .postgres_data
+echo "Removing existing ClickHouse data..."
+rm -rf .clickhouse_data # Add removal for ClickHouse data
 
 # Ensure docker-compose is running
 echo "Starting Docker containers..."
 docker-compose up -d --build # Add --build flag
 
-# Wait for containers to start
+# --- Wait for PostgreSQL --- #
 echo "Waiting for PostgreSQL to be ready..."
 # Improved wait logic: Check pg_isready
 TIMEOUT=60 # seconds
@@ -38,6 +40,23 @@ while ! docker-compose exec -T postgres pg_isready -U postgres > /dev/null 2>&1;
     sleep 2
 done
 echo " PostgreSQL is ready!"
+
+# --- Wait for ClickHouse --- #
+echo "Waiting for ClickHouse to be ready..."
+# Wait logic: Check ClickHouse healthcheck command (or simple query)
+START_TIME=$(date +%s)
+# Note: Use the healthcheck command from docker-compose.yml for reliability
+while ! docker-compose exec -T clickhouse clickhouse-client --query "SELECT 1" > /dev/null 2>&1; do
+    if [ $(($(date +%s) - START_TIME)) -ge $TIMEOUT ]; then
+        echo "Error: ClickHouse did not become ready within $TIMEOUT seconds."
+        docker-compose logs clickhouse
+        docker-compose down
+        exit 1
+    fi
+    echo -n "."
+    sleep 2
+done
+echo " ClickHouse is ready!"
 
 # Go back to project root to run tests
 cd ..

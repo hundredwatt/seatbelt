@@ -1,4 +1,4 @@
-package postgres_funcs
+package postgres
 
 import (
 	"encoding/binary"

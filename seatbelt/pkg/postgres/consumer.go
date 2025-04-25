@@ -1,4 +1,4 @@
-package replication
+package postgres
 
 import (
 	"context"
@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"seatbelt-source-postgres/pkg/config"         // Correct path relative to module root
-	"seatbelt-source-postgres/pkg/postgres_funcs" // Correct path relative to module root
-
+	"seatbelt/pkg/config" // Correct path relative to module root
+	// Correct path relative to module root
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -102,7 +101,7 @@ func (c *ReplicationConsumer) Start(ctx context.Context) (map[int32]int64, error
 	pluginArgs := []string{
 		"proto_version '1'",
 		fmt.Sprintf("publication_names '%s'", c.cfg.Replication.PublicationName),
-		"binary 'false'", // Request text data for easier processing
+		"binary 'false'",  // Request text data for easier processing
 		"messages 'true'", // Receive messages
 	}
 	err = pglogrepl.StartReplication(ctx, c.conn, c.cfg.Replication.SlotName, 0, pglogrepl.StartReplicationOptions{
@@ -437,7 +436,7 @@ func (c *ReplicationConsumer) handleDataMessage(relationID uint32, columns []*pg
 			return // Cannot compute hash if a required column is missing
 		}
 		if val == nil {
-			builder.WriteString("") // Use empty string for NULL
+			builder.WriteString("👻") // Use ghost emoju for NULL
 		} else if bytesVal, typeOk := val.([]byte); typeOk {
 			builder.WriteString(string(bytesVal)) // Append text representation
 		} else {
@@ -448,7 +447,7 @@ func (c *ReplicationConsumer) handleDataMessage(relationID uint32, columns []*pg
 	concatenatedString = builder.String()
 
 	// Compute hash
-	computedHash := postgres_funcs.PostgresHashtextextend(concatenatedString, c.cfg.HashSeed)
+	computedHash := PostgresHashtextextend(concatenatedString, c.cfg.HashSeed)
 
 	if c.debug {
 		log.Printf("DEBUG: Processed Row ID %d: String='%s' -> Hash=%d", id, concatenatedString, computedHash)

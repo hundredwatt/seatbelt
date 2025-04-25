@@ -18,10 +18,10 @@ psql:
 	docker exec -it seatbelt-postgres psql -U postgres -d seatbelt
 
 clickhouse-client:
-	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb
+	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb --password pass
 
 test:
 	go test -v ./...
 
 build:
-	go build -o seatbelt ./cmd/seatbelt-source-postgres/main.go
+	go build -o seatbelt ./cmd/seatbelt/main.go

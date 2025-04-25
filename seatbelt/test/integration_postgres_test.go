@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"seatbelt-source-postgres/pkg/config"      // Local package import
-	"seatbelt-source-postgres/pkg/replication" // Local package import
+	"seatbelt/pkg/config" // Local package import
+	// Local package import
+	"seatbelt/pkg/postgres" // Local package import
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 )
 
 // TestMain can be used for setup/teardown if needed, e.g., ensuring docker is running.
@@ -47,7 +47,7 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 	/***** Test *****/
 	// --- Step 1: Fetch Expected Hashes via SELECT ---
 	log.Println("Fetching expected hashes via SELECT...")
-	selectHashes, err := fetchTestSelectHashes(ctx, pool, cfg)
+	selectHashes, err := postgres.FetchSelectHashes(ctx, pool, cfg)
 	if err != nil {
 		t.Fatalf("Failed to fetch hashes via SELECT: %v", err)
 	}
@@ -66,17 +66,18 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 
 	// --- Step 3: Process Replication Stream ---
 	log.Println("Setting up replication consumer for test...")
-	replConsumer, err := replication.NewReplicationConsumer(cfg)
-	if err != nil {
-		t.Fatalf("Failed to create replication consumer: %v", err)
-	}
-	defer replConsumer.Close() // Ensure connection is closed
+	var replResults map[int32]int64
+
+	// Run replication consumer
+	replConsumer, err := postgres.NewReplicationConsumer(cfg) // Changed replication -> postgres
+	require.NoError(t, err, "Failed to create replication consumer")
+	defer replConsumer.Close()
 
 	log.Println("Starting replication consumer...")
 	// Run consumer with a shorter idle timeout for the test
 	replCtx, replCancel := context.WithTimeout(ctx, 10*time.Second) // Timeout for the consumer run itself
 	defer replCancel()
-	replHashes, err := replConsumer.Start(replCtx)
+	replResults, err = replConsumer.Start(replCtx) // Changed replication -> postgres (no qualifier needed as method belongs to replConsumer)
 
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		// Fail test on unexpected errors
@@ -84,30 +85,32 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 	} else if errors.Is(err, context.DeadlineExceeded) {
 		t.Logf("Replication consumer timed out as expected by replCtx.")
 	} else if err == nil {
-		t.Logf("Replication consumer finished due to idle timeout.")
+		t.Logf("Replication consumer finished due to idle timeout or reaching target LSN.") // Updated log message
 	}
 
-	if len(replHashes) == 0 {
+	if len(replResults) == 0 {
 		t.Fatalf("Replication consumer processed 0 rows. Check slot/publication/trigger logic.")
 	}
-	log.Printf("Replication consumer processed %d rows.", len(replHashes))
+	log.Printf("Replication consumer processed %d rows.", len(replResults))
 
 	/***** Verify *****/
 	log.Println("Comparing SELECT and Replication hashes...")
 	mismatches := 0
 	for id, selectHash := range selectHashes {
-		replHash, ok := replHashes[id]
+		replHash, ok := replResults[id] // Use replResults
 		if !ok {
 			t.Errorf("Mismatch: ID %d found in SELECT but MISSING in replication results", id)
 			mismatches++
-		} else if selectHash != replHash {
-			t.Errorf("Mismatch: ID %d - SELECT Hash: %d, Replication Hash: %d", id, selectHash, replHash)
+			continue
+		}
+		if selectHash != replHash {
+			t.Errorf("Mismatch: ID %d: SELECT hash %d != Replication hash %d", id, selectHash, replHash)
 			mismatches++
 		}
 	}
 
 	// Check for IDs present in replication but not SELECT (shouldn't happen with this test flow)
-	for id := range replHashes {
+	for id := range replResults { // Use replResults
 		if _, ok := selectHashes[id]; !ok {
 			t.Errorf("Mismatch: ID %d found in Replication results but MISSING in SELECT results", id)
 			mismatches++
@@ -194,47 +197,6 @@ func createTestConfig() *config.Config {
 	}
 
 	return cfg
-}
-
-// fetchTestSelectHashes is similar to main.fetchSelectHashes but uses test config/table
-func fetchTestSelectHashes(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) (map[int32]int64, error) {
-	var coalesceParts []string
-	for _, colName := range cfg.Table.HashColumns {
-		safeColName := pgx.Identifier{colName}.Sanitize()
-		coalesceParts = append(coalesceParts, fmt.Sprintf("COALESCE(%s::text, '')", safeColName))
-	}
-	concatenationExpression := strings.Join(coalesceParts, " || ")
-	idColumn := cfg.Table.IDColumn
-	fullTableName := cfg.Table.Name
-
-	query := fmt.Sprintf(`
-        SELECT %s, hashtextextended((%s), $1) AS computed_hash
-        FROM %s
-    `, idColumn, concatenationExpression, fullTableName)
-
-	log.Printf("Executing test SELECT query: %s", query)
-	rows, err := pool.Query(ctx, query, cfg.HashSeed)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute test SELECT query: %w", err)
-	}
-	defer rows.Close()
-
-	selectHashes := make(map[int32]int64)
-	for rows.Next() {
-		var id int32
-		var hash pgtype.Int8
-		if err := rows.Scan(&id, &hash); err != nil {
-			log.Printf("Test SELECT Scan Error: %v", err)
-			continue
-		}
-		if hash.Valid {
-			selectHashes[id] = hash.Int64
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating test SELECT hash rows: %w", err)
-	}
-	return selectHashes, nil
 }
 
 // triggerTestReplicationEvents forces existing data in the *test* table into WAL

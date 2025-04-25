@@ -34,12 +34,13 @@ services:
     volumes:
       - ./clickhouse-init:/docker-entrypoint-initdb.d
       - ./.clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse-listen.xml:/etc/clickhouse-server/config.d/listen.xml
     environment:
       CLICKHOUSE_DB: peerdb
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_PASSWORD: "pass"
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      test: ["CMD", "clickhouse-client", "--password", "pass", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 5

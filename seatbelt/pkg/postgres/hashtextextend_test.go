@@ -1,7 +1,9 @@
-package postgres_funcs
+package postgres_test
 
 import (
 	"testing"
+
+	"seatbelt/pkg/postgres"
 )
 
 // Implement a function in go that mimics the hashtextextended function in PostgreSQL.
@@ -71,13 +73,13 @@ var testCases = []struct {
 
 func TestHashtextextend(t *testing.T) {
 	for _, testCase := range testCases {
-		result := PostgresHashtextextend(testCase.text, testSeed)
+		result := postgres.PostgresHashtextextend(testCase.text, testSeed)
 		if result != testCase.expected {
 			t.Errorf("PostgresHashtextextend(%q, %d) = %d; expected %d", testCase.text, testSeed, result, testCase.expected)
 		}
 	}
 	// Test without seed (seed = 0)
-	noSeedResult := PostgresHashtextextend("a", 0)
+	noSeedResult := postgres.PostgresHashtextextend("a", 0)
 	// seatbelt=# select hashtextextended('a', 0); -> 3591986179850072241
 	expectedNoSeed := int64(3591986179850072241)
 	if noSeedResult != expectedNoSeed {
@@ -85,7 +87,7 @@ func TestHashtextextend(t *testing.T) {
 	}
 
 	// Test another string with seed 0
-	noSeedResult2 := PostgresHashtextextend("abcdef", 0)
+	noSeedResult2 := postgres.PostgresHashtextextend("abcdef", 0)
 	// seatbelt=# select hashtextextended('abcdef', 0); -> 290958262752763840
 	expectedNoSeed2 := int64(290958262752763840)
 	if noSeedResult2 != expectedNoSeed2 {
@@ -125,7 +127,7 @@ var testCasesDataproofTable = []struct {
 
 func TestHashtextextend_dataproof_table(t *testing.T) {
 	for _, testCase := range testCasesDataproofTable {
-		result := PostgresHashtextextend(testCase.text, 0)
+		result := postgres.PostgresHashtextextend(testCase.text, 0)
 		if result != testCase.expected {
 			t.Errorf("PostgresHashtextextend(%q, 0) = %d; expected %d", testCase.text, result, testCase.expected)
 		}
@@ -164,7 +166,7 @@ var testCasesDataproofTableSeed73 = []struct {
 
 func TestHashtextextend_dataproof_table_seed_73(t *testing.T) {
 	for _, testCase := range testCasesDataproofTableSeed73 {
-		result := PostgresHashtextextend(testCase.text, 73)
+		result := postgres.PostgresHashtextextend(testCase.text, 73)
 		if result != testCase.expected {
 			t.Errorf("PostgresHashtextextend(%q, 73) = %d; expected %d", testCase.text, result, testCase.expected)
 		}

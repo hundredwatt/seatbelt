@@ -7,7 +7,7 @@
 This repository contains a Go application designed to perform batch processing on a PostgreSQL database table. Its primary function is to verify the consistency of hash values generated in two ways:
 
 1.  **SELECT Query:** Directly computing a hash within PostgreSQL using the `hashtextextended` function on concatenated text representations of specified columns.
-2.  **Logical Replication:** Consuming logical replication events (INSERTs, UPDATEs) for the same table, reconstructing the same text representation of the specified columns from the replication stream (using text format), and computing the hash using a Go implementation (`pkg/postgres_funcs/hashtextextend.go`) that mirrors the PostgreSQL function.
+2.  **Logical Replication:** Consuming logical replication events (INSERTs, UPDATEs) for the same table, reconstructing the same text representation of the specified columns from the replication stream (using text format), and computing the hash using a Go implementation (`pkg/postgres/hashtextextend.go`) that mirrors the PostgreSQL function.
 
 The goal is to ensure that the Go implementation of the hash function produces identical results to the native PostgreSQL function for the same row data state.
 
@@ -28,7 +28,7 @@ The main application (`cmd/seatbelt/main.go`) runs as a single batch job:
     *   Processes `INSERT` and `UPDATE` messages for the configured table.
     *   For each relevant message, it extracts the necessary columns (in text format).
     *   Concatenates the text values of the configured `hash_columns`.
-    *   Computes the hash using `pkg/postgres_funcs/PostgresHashtextextend`.
+    *   Computes the hash using `pkg/postgres.PostgresHashtextextend`.
     *   Stores the result (`id -> hash`) in an in-memory map, overwriting previous entries for the same ID (capturing the latest state).
     *   Continues until the replication stream is idle for the configured `idle_timeout` duration or until a shutdown signal (SIGINT/SIGTERM) is received.
 7.  **Write Replication CSV:** Writes the final `id -> hash` map collected from the replication stream to the CSV file specified in `config.yaml` (`output.replication_csv_path`). This file represents the state captured via replication.
@@ -49,9 +49,9 @@ The application behavior is controlled by `config.yaml`:
 *   `cmd/seatbelt`: Main application entry point.
 *   `pkg/config`: Loads and parses `config.yaml`.
 *   `pkg/csvutil`: Utility for writing `map[int32]int64` to CSV.
-*   `pkg/postgres_funcs`: Contains the Go implementation of `hashtextextended`.
-*   `pkg/replication`: Handles the logical replication connection, message parsing, row reconstruction, and Go-side hash computation.
-*   `test`: Contains integration tests and Docker setup for PostgreSQL.
+*   `pkg/postgres`: Contains the Go implementation of `hashtextextended` and handles the logical replication connection, message parsing, row reconstruction, and Go-side hash computation.
+*   `pkg/clickhouse`: Contains functionality to interact with ClickHouse, specifically fetching hashes using the `xxh3` function via a SELECT query.
+*   `test`: Contains integration tests and Docker setup for PostgreSQL and ClickHouse.
 
 ## Testing
 
@@ -72,7 +72,7 @@ Integration tests are located in the `test/` directory.
     *   Creates test-specific replication slot (`seatbelt_test_slot`) and publication (`seatbelt_test_pub` for `data_proof_test`) if they don't exist.
     *   Fetches hashes from `data_proof_test` using the SELECT method (dynamic SQL construction).
     *   Triggers WAL generation for `data_proof_test` (using an `UPDATE` statement).
-    *   Runs the replication consumer (`pkg/replication`) configured for the test table, slot, and publication.
+    *   Runs the replication consumer logic (now within `pkg/postgres`) configured for the test table, slot, and publication.
     *   Compares the map of hashes obtained from SELECT with the map obtained from replication.
     *   Asserts that the hashes match for all common IDs and that there are no missing IDs in either result set.
 
@@ -94,5 +94,5 @@ Integration tests are located in the `test/` directory.
 *   The core logic comparison happens in the integration test (`test/integration_test.go`), which validates the Go hash function against the SQL hash function.
 *   The main application (`cmd/seatbelt/main.go`) primarily serves as a batch tool to generate comparable outputs (SELECT vs. Replication) for analysis, using the validated Go hash function.
 *   Pay attention to the dynamic SQL construction in `cmd/seatbelt/main.go` (`fetchSelectHashes`) and `test/integration_test.go` (`fetchTestSelectHashes`) which relies on the configuration.
-*   The replication consumer (`pkg/replication/consumer.go`) is designed to handle text-formatted replication data (`binary 'false'` plugin argument).
-*   Import paths for local packages assume the Go module path is `seatbelt-source-postgres` (defined in `go.mod`). 
+*   The replication consumer logic (`pkg/postgres/consumer.go`) is designed to handle text-formatted replication data (`binary 'false'` plugin argument).
+*   Import paths for local packages assume the Go module path is `seatbelt` (defined in `go.mod`). 

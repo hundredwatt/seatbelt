@@ -11,10 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"seatbelt-source-postgres/pkg/config"
-	"seatbelt-source-postgres/pkg/csvutil"
-	"seatbelt-source-postgres/pkg/postgres"
-	"seatbelt-source-postgres/pkg/replication"
+	"seatbelt/pkg/config"
+	"seatbelt/pkg/csvutil"
+	"seatbelt/pkg/postgres"
 )
 
 func main() {
@@ -78,7 +77,7 @@ func main() {
 	log.Println("---")
 
 	// --- Step 3: Process Replication Stream ---
-	replConsumer, err := replication.NewReplicationConsumer(cfg)
+	replConsumer, err := postgres.NewReplicationConsumer(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create replication consumer: %v", err)
 	}

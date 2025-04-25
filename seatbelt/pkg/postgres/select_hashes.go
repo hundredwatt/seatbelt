@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"seatbelt-source-postgres/pkg/config"
+	"seatbelt/pkg/config"
 )
 
 // FetchSelectHashes executes the SELECT query to get IDs and computed hashes from the database.
@@ -23,7 +23,7 @@ func FetchSelectHashes(ctx context.Context, pool *pgxpool.Pool, cfg *config.Conf
 		// Basic quoting to prevent SQL injection for column names (assuming valid identifiers)
 		// A more robust solution might involve checking against actual table schema.
 		safeColName := pgx.Identifier{colName}.Sanitize()
-		coalesceParts = append(coalesceParts, fmt.Sprintf("COALESCE(%s::text, '')", safeColName))
+		coalesceParts = append(coalesceParts, fmt.Sprintf("COALESCE(%s::text, '👻')", safeColName))
 	}
 	concatenationExpression := strings.Join(coalesceParts, " || ")
 
