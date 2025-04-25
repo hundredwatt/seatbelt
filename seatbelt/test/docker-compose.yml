@@ -1,0 +1,46 @@
+services:
+  # PostgreSQL Source Database
+  postgres:
+    image: postgres:17
+    container_name: seatbelt_source-postgres
+    ports:
+      - "55810:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: seatbelt
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d
+      - ./.postgres_data:/var/lib/postgresql/data
+      - ./postgres-config.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ClickHouse Database
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.4
+    container_name: seatbelt_clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ./clickhouse-init:/docker-entrypoint-initdb.d
+      - ./clickhouse-init/peerdb_public_data_proof.clickhouse.bin:/docker-entrypoint-initdb.d/peerdb_public_data_proof.clickhouse.bin
+      - ./.clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: peerdb
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

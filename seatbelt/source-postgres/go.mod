@@ -1,10 +1,11 @@
-module github.com/yourusername/seatbelt
+module seatbelt-source-postgres
 
 go 1.21
 
 require (
 	github.com/jackc/pglogrepl v0.0.0-20250331215543-51ad596ee12f
 	github.com/jackc/pgx/v5 v5.5.4
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
