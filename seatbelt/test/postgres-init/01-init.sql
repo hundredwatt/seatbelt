@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS data_proof (
 
 -- Copy data from CSV
 COPY data_proof (id, smallint_col, bigint_col, float_col, double_col, row_encoded, checksum)
-FROM '/entrypoint-initdb.d/data_20250329_172620.csv'
+FROM '/docker-entrypoint-initdb.d/data_20250329_172620.csv'
 WITH (
     FORMAT csv,
     HEADER true,

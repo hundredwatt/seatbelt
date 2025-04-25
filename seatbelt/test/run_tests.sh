@@ -7,12 +7,12 @@ if [ ! -f go.mod ]; then
     exit 1
 fi
 
-# Navigate to the test directory for docker-compose context
-cd test
+# Navigate to the parent test directory for docker-compose context
+cd ../test
 
 # Stop and remove existing containers
 echo "Cleaning up existing containers..."
-docker-compose -f ../../test/docker-compose.yml down
+docker-compose down
 
 # Remove PostgreSQL data to ensure clean slate with new configuration
 echo "Removing existing PostgreSQL data..."

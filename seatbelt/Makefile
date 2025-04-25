@@ -15,7 +15,13 @@ logs:
 	docker-compose -f test/docker-compose.yml logs -f
 
 psql:
-	docker exec -it seatbelt_source-postgres psql -U postgres -d seatbelt
+	docker exec -it seatbelt-postgres psql -U postgres -d seatbelt
 
 clickhouse-client:
-	docker exec -it seatbelt_clickhouse clickhouse-client -d peerdb
+	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb
+
+test:
+	go test -v ./...
+
+build:
+	go build -o seatbelt ./cmd/seatbelt-source-postgres/main.go
