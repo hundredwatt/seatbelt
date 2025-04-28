@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"seatbelt/pkg/config" // Correct path relative to module root
+	"seatbelt/pkg/config"  // Correct path relative to module root
+	"seatbelt/pkg/targets" // Import target hasher interface
+
 	// Correct path relative to module root
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,9 +21,10 @@ import (
 )
 
 // ReplicationResult holds the processed data from the replication stream.
+// Now includes both source (Postgres) and target hashes.
 type ReplicationResult struct {
-	ID   int32
-	Hash int64
+	SourceHash int64
+	TargetHash uint64
 }
 
 // ReplicationConsumer manages the replication connection and message handling
@@ -32,13 +35,15 @@ type ReplicationConsumer struct {
 	typeMap      *pgtype.Map
 	idleTimeout  time.Duration
 	lastActivity time.Time
-	results      map[int32]int64 // Store results here (ID -> Hash)
+	results      map[int32]ReplicationResult // Store results here (ID -> {SourceHash, TargetHash})
 	debug        bool
-	targetLSN    pglogrepl.LSN // Target LSN to reach before completing
+	targetLSN    pglogrepl.LSN        // Target LSN to reach before completing
+	targetHasher targets.TargetHasher // Added target hasher
 }
 
 // NewReplicationConsumer creates a new consumer
-func NewReplicationConsumer(cfg *config.Config) (*ReplicationConsumer, error) {
+// Now accepts a TargetHasher
+func NewReplicationConsumer(cfg *config.Config, targetHasher targets.TargetHasher) (*ReplicationConsumer, error) {
 	// Use a separate context for connection as it's short-lived
 	connCtx, connCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer connCancel()
@@ -62,13 +67,15 @@ func NewReplicationConsumer(cfg *config.Config) (*ReplicationConsumer, error) {
 		typeMap:      pgtype.NewMap(),
 		idleTimeout:  idleTimeout,
 		lastActivity: time.Now(),
-		results:      make(map[int32]int64),
+		results:      make(map[int32]ReplicationResult), // Initialize new map type
 		debug:        cfg.Debug,
+		targetHasher: targetHasher, // Store the target hasher
 	}, nil
 }
 
 // Start consumes the replication stream until idle timeout or context cancellation.
-func (c *ReplicationConsumer) Start(ctx context.Context) (map[int32]int64, error) {
+// Returns a map of ID -> {SourceHash, TargetHash}
+func (c *ReplicationConsumer) Start(ctx context.Context) (map[int32]ReplicationResult, error) {
 	log.Printf("Starting replication consumer loop for table %s...", c.cfg.Table.Name)
 
 	// Create a standard connection for operations that can't use replication connection
@@ -376,7 +383,7 @@ func (c *ReplicationConsumer) getCurrentLSN(ctx context.Context, conn *pgconn.Pg
 	return lsn, nil
 }
 
-// forceWalIncrement sends a WAL message to force the WAL to advance using standard connection
+// forceWalIncrement sends a WAL message to force the WAL to advnce using standard connection
 func (c *ReplicationConsumer) forceWalIncrement(ctx context.Context, conn *pgconn.PgConn) error {
 	// Use pg_logical_emit_message to emit a non-transactional message
 	// This will force WAL to advance without needing to create tables
@@ -426,9 +433,8 @@ func (c *ReplicationConsumer) handleDataMessage(relationID uint32, columns []*pg
 		return
 	}
 
-	// Concatenate configured hash columns
-	var builder strings.Builder
-	concatenatedString := ""
+	// Concatenate configured hash columns for source hashing
+	var sourceBuilder strings.Builder
 	for _, colName := range c.cfg.Table.HashColumns {
 		val, ok := values[colName]
 		if !ok {
@@ -436,25 +442,40 @@ func (c *ReplicationConsumer) handleDataMessage(relationID uint32, columns []*pg
 			return // Cannot compute hash if a required column is missing
 		}
 		if val == nil {
-			builder.WriteString("👻") // Use ghost emoju for NULL
+			sourceBuilder.WriteString("👻") // Use ghost emoju for NULL
 		} else if bytesVal, typeOk := val.([]byte); typeOk {
-			builder.WriteString(string(bytesVal)) // Append text representation
+			sourceBuilder.WriteString(string(bytesVal)) // Append text representation
 		} else {
 			log.Printf("Error: Unexpected type for hash column '%s' (ID %d): %T. Treating as empty string.", colName, id, val)
-			builder.WriteString("")
+			sourceBuilder.WriteString("")
 		}
 	}
-	concatenatedString = builder.String()
+	sourceConcatenatedString := sourceBuilder.String()
 
-	// Compute hash
-	computedHash := PostgresHashtextextend(concatenatedString, c.cfg.HashSeed)
+	// Compute source hash
+	computedSourceHash := PostgresHashtextextend(sourceConcatenatedString, c.cfg.HashSeed)
+
+	// Transform data for target hashing
+	targetString, err := c.targetHasher.Transform(values)
+	if err != nil {
+		log.Printf("Error: Failed to transform row ID %d for target hashing: %v", id, err)
+		return // Cannot compute target hash
+	}
+
+	// Compute target hash
+	// Pass the source seed, though the target hasher might ignore it (like ClickHouse's)
+	computedTargetHash := c.targetHasher.Hash(targetString, c.cfg.HashSeed)
 
 	if c.debug {
-		log.Printf("DEBUG: Processed Row ID %d: String='%s' -> Hash=%d", id, concatenatedString, computedHash)
+		log.Printf("DEBUG: Processed Row ID %d: SourceString='%s' -> SourceHash=%d, TargetString='%s' -> TargetHash=%d",
+			id, sourceConcatenatedString, computedSourceHash, targetString, computedTargetHash)
 	}
 
 	// Store the result (overwrite if ID already exists)
-	c.results[id] = computedHash
+	c.results[id] = ReplicationResult{
+		SourceHash: computedSourceHash,
+		TargetHash: computedTargetHash,
+	}
 }
 
 // parseRow parses columns, expecting text format.

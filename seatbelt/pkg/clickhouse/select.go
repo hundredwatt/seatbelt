@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"log"
 
 	"github.com/ClickHouse/clickhouse-go/v2"   // Assuming v2 driver
 	_ "github.com/ClickHouse/clickhouse-go/v2" // Register the driver
@@ -37,6 +38,8 @@ func FetchSelectHashes(ctx context.Context, connStr string, tableName string, id
 		concatExpr,
 		tableName,
 	)
+
+	log.Println("query", query)
 
 	// Connect using the clickhouse-go/v2 driver
 	conn, err := sql.Open("clickhouse", connStr)

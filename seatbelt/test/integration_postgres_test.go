@@ -2,16 +2,22 @@ package test
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"seatbelt/pkg/config" // Local package import
 	// Local package import
-	"seatbelt/pkg/postgres" // Local package import
+	"seatbelt/pkg/clickhouse" // Import ClickHouse target hasher
+	"seatbelt/pkg/postgres"   // Local package import
+
+	// For TargetHasher interface
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -44,6 +50,17 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 	// --- Create Test Config ---
 	cfg := createTestConfig()
 
+	// --- Create Target Hasher (ClickHouse) ---
+	targetHasher := clickhouse.NewClickHouseTargetHasher(cfg.Table.HashColumns, cfg.Debug)
+
+	// --- Load Expected Target Hashes ---
+	log.Println("Loading expected target hashes from CSV...")
+	expectedTargetHashes, err := loadExpectedTargetHashes(t, "testdata/clickhouse_data_proof_hashes.csv")
+	if err != nil {
+		t.Fatalf("Failed to load expected target hashes: %v", err)
+	}
+	log.Printf("Loaded %d expected target hashes.", len(expectedTargetHashes))
+
 	/***** Test *****/
 	// --- Step 1: Fetch Expected Hashes via SELECT ---
 	log.Println("Fetching expected hashes via SELECT...")
@@ -66,10 +83,10 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 
 	// --- Step 3: Process Replication Stream ---
 	log.Println("Setting up replication consumer for test...")
-	var replResults map[int32]int64
+	var replResults map[int32]postgres.ReplicationResult // Updated type
 
 	// Run replication consumer
-	replConsumer, err := postgres.NewReplicationConsumer(cfg) // Changed replication -> postgres
+	replConsumer, err := postgres.NewReplicationConsumer(cfg, targetHasher) // Pass target hasher
 	require.NoError(t, err, "Failed to create replication consumer")
 	defer replConsumer.Close()
 
@@ -94,33 +111,58 @@ func TestIntegration_SelectVsReplication(t *testing.T) {
 	log.Printf("Replication consumer processed %d rows.", len(replResults))
 
 	/***** Verify *****/
-	log.Println("Comparing SELECT and Replication hashes...")
+	log.Println("Comparing SELECT, Replication, and Expected Target hashes...")
 	mismatches := 0
 	for id, selectHash := range selectHashes {
-		replHash, ok := replResults[id] // Use replResults
+		replData, ok := replResults[id]
 		if !ok {
 			t.Errorf("Mismatch: ID %d found in SELECT but MISSING in replication results", id)
 			mismatches++
 			continue
 		}
-		if selectHash != replHash {
-			t.Errorf("Mismatch: ID %d: SELECT hash %d != Replication hash %d", id, selectHash, replHash)
+		// Compare Source Hash
+		if selectHash != replData.SourceHash {
+			t.Errorf("Source Hash Mismatch: ID %d: SELECT hash %d != Replication hash %d", id, selectHash, replData.SourceHash)
+			mismatches++
+		}
+
+		// Compare Target Hash
+		expectedTargetHash, ok := expectedTargetHashes[id]
+		if !ok {
+			t.Errorf("Target Hash Mismatch: ID %d found in replication results but MISSING in expected target hashes file", id)
+			mismatches++
+		} else if replData.TargetHash != expectedTargetHash {
+			t.Errorf("Target Hash Mismatch: ID %d: Replication target hash %d != Expected target hash %d", id, replData.TargetHash, expectedTargetHash)
 			mismatches++
 		}
 	}
 
 	// Check for IDs present in replication but not SELECT (shouldn't happen with this test flow)
-	for id := range replResults { // Use replResults
+	for id := range replResults {
 		if _, ok := selectHashes[id]; !ok {
 			t.Errorf("Mismatch: ID %d found in Replication results but MISSING in SELECT results", id)
+			mismatches++
+		}
+		// Also check if present in replication but missing in expected target (already checked above, but good for clarity)
+		if _, ok := expectedTargetHashes[id]; !ok {
+			// Error already reported in the main loop
+			// t.Errorf("Mismatch: ID %d found in Replication results but MISSING in expected target hashes file", id)
+			// mismatches++ // Don't double count
+		}
+	}
+
+	// Check for IDs present in expected target but not replication
+	for id := range expectedTargetHashes {
+		if _, ok := replResults[id]; !ok {
+			t.Errorf("Mismatch: ID %d found in Expected target hashes file but MISSING in replication results", id)
 			mismatches++
 		}
 	}
 
 	if mismatches > 0 {
-		t.Fatalf("Test failed with %d mismatches between SELECT and Replication hashes.", mismatches)
+		t.Fatalf("Test failed with %d mismatches between SELECT, Replication, and Expected Target hashes.", mismatches)
 	} else {
-		log.Println("Success! All SELECT and Replication hashes match.")
+		log.Println("Success! All SELECT, Replication Source, and Expected Target hashes match.")
 	}
 
 	log.Println("TestIntegration_SelectVsReplication finished.")
@@ -233,4 +275,56 @@ func triggerTestReplicationEvents(ctx context.Context, t *testing.T, pool *pgxpo
 
 	log.Printf("Successfully triggered replication events via TRUNCATE/INSERT on %s.", tableName)
 	return nil
+}
+
+// loadExpectedTargetHashes reads the CSV file and returns a map of ID -> TargetHash
+func loadExpectedTargetHashes(t *testing.T, filePath string) (map[int32]uint64, error) {
+	t.Helper()
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV data from %s: %w", filePath, err)
+	}
+
+	expectedHashes := make(map[int32]uint64)
+	if len(records) == 0 {
+		return expectedHashes, nil // Empty file is valid, just no hashes
+	}
+
+	// Assuming header: ID, StringValue (ignored), TargetHash
+	for i, record := range records {
+		if len(record) < 3 {
+			log.Printf("Warning: Skipping malformed CSV record %d in %s (expected at least 3 columns, got %d): %v", i+1, filePath, len(record), record)
+			continue
+		}
+
+		idStr := record[0]
+		hashStr := record[2] // Target hash is the 3rd column (index 2)
+
+		id64, err := strconv.ParseInt(idStr, 10, 32)
+		if err != nil {
+			log.Printf("Warning: Skipping record %d in %s due to invalid ID '%s': %v", i+1, filePath, idStr, err)
+			continue
+		}
+		id := int32(id64)
+
+		hashVal, err := strconv.ParseUint(hashStr, 10, 64)
+		if err != nil {
+			log.Printf("Warning: Skipping record %d in %s due to invalid hash '%s' for ID %d: %v", i+1, filePath, hashStr, id, err)
+			continue
+		}
+
+		if _, exists := expectedHashes[id]; exists {
+			log.Printf("Warning: Duplicate ID %d found in %s. Overwriting previous hash.", id, filePath)
+		}
+		expectedHashes[id] = hashVal
+	}
+
+	return expectedHashes, nil
 }
