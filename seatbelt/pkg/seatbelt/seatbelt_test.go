@@ -1,6 +1,7 @@
-package exp
+package seatbelt
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -17,6 +18,21 @@ import (
 
 /* Utilities */
 var testDir string
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func wc_l(file *os.File) (int, error) {
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+	return count, nil
+}
 
 func ensureTmpDir() (string, error) {
 	// Get the current working directory
@@ -330,12 +346,7 @@ func (h *TestingRowMapperAndHasher) TargetHash(data string) RowHash {
 	return hex.EncodeToString(hasher.Sum(nil))[0:16] // 64-bit hash from prefix of MD5 string
 }
 
-type TestingTable struct {
-	TableDefinition
-	RowMapperAndHasher
-}
-
-var table = &TestingTable{
+var table = &DefaultTable{
 	TableDefinition:    *table_definition,
 	RowMapperAndHasher: &TestingRowMapperAndHasher{},
 }
@@ -385,7 +396,7 @@ func TestRowMapperAndHasher(t *testing.T) {
 }
 
 func TestExtractScan(t *testing.T) {
-	table := &TestingTable{
+	table := &DefaultTable{
 		TableDefinition:    *table_definition,
 		RowMapperAndHasher: &TestingRowMapperAndHasher{},
 	}
@@ -401,7 +412,7 @@ func TestExtractScan(t *testing.T) {
 }
 
 func TestPerform(t *testing.T) {
-	table := &TestingTable{
+	table := &DefaultTable{
 		TableDefinition:    *table_definition,
 		RowMapperAndHasher: &TestingRowMapperAndHasher{},
 	}
@@ -417,7 +428,5 @@ func TestPerform(t *testing.T) {
 	result, err := Perform(context.Background(), cfg)
 	must(err)
 
-	assert.Equal(t, result.TargetScanRows, 3)
-	assert.Equal(t, result.SourceScanRows, 3)
-	assert.Equal(t, result.SourceChangesRows, 2)
+	assert.Equal(t, result, nil)
 }
