@@ -52,7 +52,7 @@ func final(a, b, c *uint32) {
 
 // PostgresHashtextextend mimics the hashtextextended function in PostgreSQL.
 // It implements the logic from hash_bytes_extended in src/common/hashfn.c
-func PostgresHashtextextend(text string, seed int64) int64 {
+func PostgresHashtextextended(text string, seed int64) int64 {
 	// k := *(*[]byte)(unsafe.Pointer(&text)) // Get bytes without allocation (Original unsafe way)
 	k := []byte(text) // Use standard Go conversion (safer, involves allocation)
 	length := len(k)

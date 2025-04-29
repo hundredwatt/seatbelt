@@ -1,4 +1,4 @@
-package postgres2
+package postgres
 
 import (
 	"context"
@@ -87,7 +87,49 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 }
 
 func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
-	return nil, nil
+	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-extract-scan-%s-*.csv", table.Name()))
+	if err != nil {
+		return nil, err
+	}
+	file := seatbelt.NewDataFile(osfile)
+
+	source_column_names := make([]string, len(table.SourceColumns()))
+	for i, column := range table.SourceColumns() {
+		source_column_names[i] = column.Name + "::text"
+	}
+	query := fmt.Sprintf("SELECT %s, %s FROM %s", table.PrimaryKey(), strings.Join(source_column_names, ","), table.Name())
+	rows, err := s.conn.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Write the rows to the file
+	for rows.Next() {
+		row, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		pk_val := row[0]
+		source_column_values := row[1:]
+
+		source_row_string, err := table.FormatSource(source_column_values)
+		if err != nil {
+			return nil, err
+		}
+
+		target_row_string, err := table.TransformSourceToCommon(source_column_values)
+		if err != nil {
+			return nil, err
+		}
+
+		source_row_hash := table.SourceHash(source_row_string)
+		target_row_hash := table.TargetHash(target_row_string)
+
+		file.WriteLine(fmt.Sprintf("%d,%s,%s", pk_val, source_row_hash, target_row_hash))
+	}
+
+	return file, nil
 }
 
 func (s *PostgresSource) StartChangeStreamConsumer(ctx context.Context, table seatbelt.Table) (seatbelt.ChangeStreamConsumer, error) {

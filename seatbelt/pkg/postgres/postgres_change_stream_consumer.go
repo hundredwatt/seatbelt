@@ -1,4 +1,4 @@
-package postgres2
+package postgres
 
 import (
 	"context"
@@ -27,7 +27,7 @@ type PostgresChangeStreamConsumer struct {
 	typeMap         *pgtype.Map
 	idleTimeout     time.Duration
 	lastActivity    time.Time
-	results         map[string]seatbelt.RowHash // Store results here (PrimaryKey -> Hash)
+	results         map[string]seatbelt.RowHashPair // Store results here (PrimaryKey -> (SourceHash, TargetHash))
 	debug           bool
 	targetLSN       pglogrepl.LSN // Target LSN to reach before completing
 	slotName        string        // Replication slot name
@@ -99,7 +99,7 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 		typeMap:         pgtype.NewMap(),
 		idleTimeout:     idleTimeout,
 		lastActivity:    time.Now(),
-		results:         make(map[string]seatbelt.RowHash), // Initialize results map
+		results:         make(map[string]seatbelt.RowHashPair), // Initialize results map
 		debug:           debug,
 		slotName:        slotName,        // Store from config
 		publicationName: publicationName, // Store from config
@@ -429,17 +429,26 @@ func (c *PostgresChangeStreamConsumer) handleDataMessage(relationID uint32, colu
 		return
 	}
 
-	computedHash := c.table.SourceHash(formatted_row_string)
+	formatted_target_string, err := c.table.TransformSourceToCommon(values_array)
+	if err != nil {
+		log.Printf("Error: Failed to trasnform source row to common string: %v", err)
+		return
+	}
+
+	hashPair := seatbelt.RowHashPair{
+		SourceHash: c.table.SourceHash(formatted_row_string),
+		TargetHash: c.table.TargetHash(formatted_target_string),
+	}
 
 	if c.debug {
 		// log.Printf("DEBUG: Processed Row PK %s: SourceString='%s' -> SourceHash=%d",
 		// 	pkStr, sourceConcatenatedString, computedSourceHash)
 		// Log might need adjustment based on what MapAndHash does if we need intermediate string.
-		log.Printf("DEBUG: Processed Row PK %s -> Computed Hash=%d", pkStr, computedHash)
+		log.Printf("DEBUG: Processed Row PK %s -> HashPair=%v", pkStr, hashPair)
 	}
 
 	// Store the result (overwrite if PK already exists)
-	c.results[pkStr] = computedHash
+	c.results[pkStr] = hashPair
 }
 
 // parseRow parses columns, expecting text format. Returns map[colName]string or nil for NULLs.
@@ -505,7 +514,7 @@ func (c *PostgresChangeStreamConsumer) createDataFile() (*seatbelt.DataFile, err
 
 	// Write header
 	// Match Scan output format. Corrected unterminated string literal.
-	header := fmt.Sprintf("%s,%s\n", c.table.PrimaryKey(), "computed_hash")
+	header := fmt.Sprintf("%s,%s,%s\n", c.table.PrimaryKey(), "source_hash", "target_hash")
 	if _, err := file.File.WriteString(header); err != nil { // Use file.File field
 		file.Close() // Close file on error
 		return nil, fmt.Errorf("failed to write header to CDC result file: %w", err)
@@ -513,10 +522,10 @@ func (c *PostgresChangeStreamConsumer) createDataFile() (*seatbelt.DataFile, err
 
 	// Write data rows
 	rowCount := 0
-	for pk, hash := range c.results {
+	for pk, hashPair := range c.results {
 		// TODO: Need proper CSV escaping if PK contains commas, quotes, or newlines
 		// Corrected unterminated string literal.
-		row := fmt.Sprintf("%s,%d\n", pk, hash)
+		row := fmt.Sprintf("%s,%s,%s\n", pk, hashPair.SourceHash.String(), hashPair.TargetHash.String())
 		if _, err := file.File.WriteString(row); err != nil { // Use file.File field
 			file.Close() // Close file on error
 			return nil, fmt.Errorf("failed to write row (PK: %s) to CDC result file: %w", pk, err)

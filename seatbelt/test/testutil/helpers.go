@@ -9,6 +9,7 @@ import (
 )
 
 func FindLineWithPrefix(file *os.File, prefix string) (string, error) {
+	file.Seek(0, 0)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		if strings.HasPrefix(scanner.Text(), prefix) {

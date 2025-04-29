@@ -1,10 +1,5 @@
 package seatbelt
 
-import (
-	"encoding/hex"
-	"fmt"
-)
-
 type ColumnType string
 
 const (
@@ -70,46 +65,6 @@ func (t *TableDefinition) TargetColumns() []Column {
 		columns[i] = Column{Name: column.Name, Type: column.TargetType}
 	}
 	return columns
-}
-
-/* RowHash Types */
-type RowHash interface {
-	// Empty interface to allow either uint64 or [16]byte
-	// Implementations should return either uint64 or [16]byte
-}
-
-type Uint64Hash uint64
-
-func (h Uint64Hash) String() string {
-	return fmt.Sprintf("%d", h)
-}
-
-type Int64Hash int64
-
-func (h Int64Hash) String() string {
-	return fmt.Sprintf("%d", h)
-}
-
-type Hex32Hash [32]byte
-
-func (h Hex32Hash) String() string {
-	return hex.EncodeToString(h[:])
-}
-
-type SourceHasher interface {
-	FormatSource(row []interface{}) (string, error)
-	SourceHash(data string) RowHash
-}
-
-type TargetHasher interface {
-	TransformSourceToCommon(row []interface{}) (string, error)
-	TransformTargetToCommon(row []interface{}) (string, error)
-	TargetHash(data string) RowHash
-}
-
-type RowMapperAndHasher interface {
-	SourceHasher
-	TargetHasher
 }
 
 /* Table Interface */
