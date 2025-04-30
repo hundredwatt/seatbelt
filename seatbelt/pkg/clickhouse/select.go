@@ -11,6 +11,7 @@ import (
 	_ "github.com/ClickHouse/clickhouse-go/v2" // Register the driver
 )
 
+// DEPRECATED
 // FetchSelectHashes connects to ClickHouse, executes a SELECT query to compute
 // xxh3 hashes for specified columns, and returns a map of id -> hash.
 func FetchSelectHashes(ctx context.Context, connStr string, tableName string, idColumn string, hashColumns []string) (map[int32]uint64, error) {

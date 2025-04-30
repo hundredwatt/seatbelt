@@ -2,13 +2,15 @@ package test
 
 import (
 	"context"
-	"log"
+	"database/sql"
+	"os"
 	"testing"
-	"time"
 
 	"seatbelt/pkg/clickhouse"
+	"seatbelt/pkg/seatbelt"
+	"seatbelt/test/testutil"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 // Constants for ClickHouse test configuration
@@ -19,29 +21,39 @@ const (
 	testClickHouseIDColumn   = "id"
 )
 
-// TestIntegration_ClickHouseSelect verifies that fetching hashes via SELECT from ClickHouse works.
-func TestIntegration_ClickHouseSelect(t *testing.T) {
-	log.Println("Starting TestIntegration_ClickHouseSelect...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Timeout for the test
-	defer cancel()
+var test_clickhouse_table_definition = &seatbelt.TableDefinition{
+	TableName:      testClickHouseTableName,
+	PrimaryKeyName: testClickHouseIDColumn,
+	Columns: []seatbelt.ColumnMapping{
+		{Name: "smallint_col", SourceType: seatbelt.ColumnTypeSmallInt, TargetType: seatbelt.ColumnTypeSmallInt},
+		{Name: "bigint_col", SourceType: seatbelt.ColumnTypeBigInt, TargetType: seatbelt.ColumnTypeBigInt},
+		{Name: "float_col", SourceType: seatbelt.ColumnTypeFloat, TargetType: seatbelt.ColumnTypeFloat},
+		{Name: "double_col", SourceType: seatbelt.ColumnTypeDouble, TargetType: seatbelt.ColumnTypeDouble},
+	},
+}
 
-	// Define columns to hash (must match schema in clickhouse-init/01-init.sql)
-	hashColumns := []string{"smallint_col", "bigint_col", "float_col", "double_col"}
+var test_clickhouse_table = &seatbelt.DefaultTable{
+	TableDefinition:    *test_clickhouse_table_definition,
+	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&testutil.MockSourceHasher{}, &clickhouse.ClickHouseTargetHasher{}),
+}
 
-	// --- Step 1: Fetch Hashes via SELECT from ClickHouse ---
-	log.Println("Fetching hashes via SELECT from ClickHouse...")
-	clickhouseHashes, err := clickhouse.FetchSelectHashes(
-		ctx,
-		testClickHouseConnString,
-		testClickHouseTableName,
-		testClickHouseIDColumn,
-		hashColumns,
-	)
+func TestClickhouse_Scan(t *testing.T) {
+	conn, err := sql.Open("clickhouse", testClickHouseConnString)
+	if err != nil {
+		t.Fatalf("Failed to open clickhouse connection: %v", err)
+	}
+	defer conn.Close()
 
-	// --- Verify --- //
-	require.NoError(t, err, "FetchSelectHashes returned an error")
-	require.NotEmpty(t, clickhouseHashes, "FetchSelectHashes returned an empty map. Check if data was loaded into %s.", testClickHouseTableName)
+	target := clickhouse.NewClickHouseTarget(conn)
 
-	log.Printf("Successfully fetched %d hashes from ClickHouse table %s.", len(clickhouseHashes), testClickHouseTableName)
-	log.Println("TestIntegration_ClickHouseSelect finished.")
+	scan, err := target.Scan(context.Background(), test_clickhouse_table)
+	if err != nil {
+		t.Fatalf("Failed to extract scan: %v", err)
+	}
+	defer os.Remove(scan.Name())
+
+	assert.Equal(t, int64(25), scan.RowCount())
+	id25_line, err := testutil.FindLineWithPrefix(scan.File, "25,")
+	assert.NoError(t, err)
+	assert.Equal(t, "25,5503049319380937786", id25_line)
 }

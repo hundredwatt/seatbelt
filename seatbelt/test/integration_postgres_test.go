@@ -79,7 +79,7 @@ func TestPostgres_ExtractScan(t *testing.T) {
 }
 
 func TestPostgres_ConsumeChangeStream(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second) // Generous timeout for test
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Generous timeout for test
 	defer cancel()
 
 	pool := setupTestDB(ctx, t)

@@ -706,13 +706,6 @@ func (c *PostgresChangeStreamConsumer) sendStandbyStatus(lsn pglogrepl.LSN) {
 	}
 }
 
-// createDataFile creates a temporary CSV file and writes the collected results to it.
-func (c *PostgresChangeStreamConsumer) createDataFile() (*seatbelt.DataFile, error) {
-	// THIS FUNCTION WILL BE REPLACED/REMOVED
-	// ... existing code ...
-	return nil, fmt.Errorf("createDataFile should not be called directly anymore") // Placeholder
-}
-
 // Close cleans up resources used by the consumer.
 func (c *PostgresChangeStreamConsumer) Close() error {
 	log.Println("Closing PostgresChangeStreamConsumer...")
