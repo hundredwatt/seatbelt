@@ -24,7 +24,7 @@ func NewClickHouseTarget(conn *sql.DB) *ClickHouseTarget {
 
 // Scan retrieves rows from ClickHouse and computes hashes for comparison
 func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
-	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-clickhouse-scan-%s-*.csv", table.Name()))
+	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-clickhouse-scan-%s-*.csv", table.TargetName()))
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	query := fmt.Sprintf(`
 		SELECT %s, xxh3(%s) AS computed_hash
 		FROM %s
-	`, table.PrimaryKey(), concatExpr, table.Name())
+	`, table.PrimaryKey(), concatExpr, table.TargetName())
 
 	// Execute the query
 	rows, err := t.conn.QueryContext(ctx, query)

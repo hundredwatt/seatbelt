@@ -39,7 +39,7 @@ var table_definition = &seatbelt.TableDefinition{
 
 var table = &seatbelt.DefaultTable{
 	TableDefinition:    *table_definition,
-	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&postgres.PostgresSourceHasher{}, &testutil.MockTargetHasher{}),
+	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&postgres.PostgresSourceHasher{}, &testutil.MockTargetHasher{}, &testutil.MockRowMapper{}),
 }
 
 func TestPostgres_Scan(t *testing.T) {

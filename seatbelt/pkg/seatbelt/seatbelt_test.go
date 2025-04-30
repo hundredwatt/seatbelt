@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,7 @@ import (
 	"time"
 
 	"github.com/zeebo/xxh3"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 /* Utilities */
@@ -105,12 +104,12 @@ type TestingSource struct {
 	Data []map[string]interface{}
 }
 
-func (s *TestingSource) Scan(ctx context.Context, table Table) (*os.File, error) {
-	file, err := os.Create(filepath.Join(testDir, "source_scan.txt"))
+func (s *TestingSource) Scan(ctx context.Context, table Table) (*DataFile, error) {
+	osfile, err := os.Create(filepath.Join(testDir, "source_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
-
+	file := NewDataFile(osfile)
 	for _, row := range s.Data {
 		values := make([]interface{}, len(row))
 		for i, column := range table.SourceColumns() {
@@ -121,18 +120,19 @@ func (s *TestingSource) Scan(ctx context.Context, table Table) (*os.File, error)
 			return nil, err
 		}
 		source_hash := table.SourceHash(row_string)
-		file.WriteString(fmt.Sprintf("%d,%d,%s\n", row["id"], source_hash, row_string))
+		file.WriteLine("%d,%d,%s", row["id"], source_hash, row_string)
 	}
 
-	file.Seek(0, 0)
+	file.Rewind()
 	return file, nil
 }
 
-func (s *TestingSource) ExtractScan(ctx context.Context, table Table) (*os.File, error) {
-	file, err := os.Create(filepath.Join(testDir, "source_extract_scan.txt"))
+func (s *TestingSource) ExtractScan(ctx context.Context, table Table) (*DataFile, error) {
+	osfile, err := os.Create(filepath.Join(testDir, "source_extract_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
+	file := NewDataFile(osfile)
 
 	for _, row := range s.Data {
 		source_values := make([]interface{}, len(row))
@@ -147,10 +147,10 @@ func (s *TestingSource) ExtractScan(ctx context.Context, table Table) (*os.File,
 			return nil, err
 		}
 		target_hash := table.TargetHash(target_row_string)
-		file.WriteString(fmt.Sprintf("%d,%d,%s,%s,%s\n", row["id"], source_hash, target_hash, row_string, target_row_string))
+		file.WriteLine("%d,%d,%s,%s,%s", row["id"], source_hash, target_hash, row_string, target_row_string)
 	}
 
-	file.Seek(0, 0)
+	file.Rewind()
 	return file, nil
 }
 
@@ -160,7 +160,7 @@ func (s *TestingSource) StartChangeStreamConsumer(ctx context.Context, table Tab
 
 type TestingChangeStreamConsumer struct {
 	Data         []map[string]interface{}
-	OutputFile   *os.File
+	OutputFile   *DataFile
 	Complete     chan struct{}
 	ErrorChannel chan error
 	WaitGroup    *sync.WaitGroup
@@ -169,10 +169,11 @@ type TestingChangeStreamConsumer struct {
 }
 
 func NewTestingChangeStreamConsumer(table Table) (*TestingChangeStreamConsumer, error) {
-	output_file, err := os.Create(filepath.Join(testDir, "source_changes.txt"))
+	osfile, err := os.Create(filepath.Join(testDir, "source_changes.txt"))
 	if err != nil {
 		return nil, err
 	}
+	output_file := NewDataFile(osfile)
 	complete := make(chan struct{})
 	error_channel := make(chan error)
 	consumer := &TestingChangeStreamConsumer{Data: source_changes, OutputFile: output_file, Complete: complete, ErrorChannel: error_channel, WaitGroup: &sync.WaitGroup{}, Context: context.Background(), Table: table}
@@ -207,7 +208,7 @@ func (c *TestingChangeStreamConsumer) startReader() error {
 				return
 			}
 			target_hash := c.Table.TargetHash(target_row_string)
-			_, err = fmt.Fprintf(c.OutputFile, "%d,%d,%s,%s,%s\n", row["id"], source_hash, target_hash, row_string, target_row_string)
+			_, err = c.OutputFile.WriteLine("%d,%d,%s,%s,%s", row["id"], source_hash, target_hash, row_string, target_row_string)
 			if err != nil {
 				c.ErrorChannel <- err
 				return
@@ -247,7 +248,7 @@ func (c *TestingChangeStreamConsumer) startReader() error {
 	return nil
 }
 
-func (c *TestingChangeStreamConsumer) ConsumeToCompletion() (*os.File, error) {
+func (c *TestingChangeStreamConsumer) ConsumeToCompletion() (*DataFile, error) {
 	c.Complete <- struct{}{}
 
 	done := make(chan struct{})
@@ -288,12 +289,12 @@ var target_data = []map[string]interface{}{
 	},
 }
 
-func (t *TestingTarget) Scan(ctx context.Context, table Table) (*os.File, error) {
-	file, err := os.Create(filepath.Join(testDir, "target_scan.txt"))
+func (t *TestingTarget) Scan(ctx context.Context, table Table) (*DataFile, error) {
+	osfile, err := os.Create(filepath.Join(testDir, "target_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
-
+	file := NewDataFile(osfile)
 	for _, row := range t.Data {
 		values := make([]interface{}, len(row))
 		for i, column := range table.TargetColumns() {
@@ -305,10 +306,10 @@ func (t *TestingTarget) Scan(ctx context.Context, table Table) (*os.File, error)
 		}
 		target_hash := table.TargetHash(row_string)
 
-		file.WriteString(fmt.Sprintf("%d,%s,%s\n", row["id"], target_hash, row_string))
+		file.WriteLine("%d,%s,%s", row["id"], target_hash, row_string)
 	}
 
-	file.Seek(0, 0)
+	file.Rewind()
 	return file, nil
 }
 
@@ -336,14 +337,14 @@ func (h *TestingRowMapperAndHasher) TransformTargetToCommon(row []interface{}) (
 }
 
 func (h *TestingRowMapperAndHasher) SourceHash(data string) RowHash {
-	return xxh3.Hash([]byte(data))
+	return Uint64Hash(xxh3.Hash([]byte(data)))
 }
 
 func (h *TestingRowMapperAndHasher) TargetHash(data string) RowHash {
 	hasher := md5.New()
 	hasher.Write([]byte(data))
 
-	return hex.EncodeToString(hasher.Sum(nil))[0:16] // 64-bit hash from prefix of MD5 string
+	return Hex16Hash(hasher.Sum(nil)[0:16])
 }
 
 var table = &DefaultTable{
@@ -390,9 +391,9 @@ func TestRowMapperAndHasher(t *testing.T) {
 	assert.Equal(t, test_row_string, "John|100")
 	assert.Equal(t, common_from_source_string, "John|100.0")
 	assert.Equal(t, common_from_target_string, "John|100.0")
-	assert.Equal(t, source_hash, uint64(6710712646738599732))
-	assert.Equal(t, target_hash_from_source, "c42581752697e38e")
-	assert.Equal(t, target_hash_from_target, "c42581752697e38e")
+	assert.Equal(t, source_hash, Uint64Hash(6710712646738599732))
+	assert.Equal(t, target_hash_from_source.String(), "c42581752697e38e6bf312112469d28c")
+	assert.Equal(t, target_hash_from_target.String(), "c42581752697e38e6bf312112469d28c")
 }
 
 func TestExtractScan(t *testing.T) {
@@ -405,7 +406,7 @@ func TestExtractScan(t *testing.T) {
 	extract_scan, err := source.ExtractScan(context.Background(), table)
 	must(err)
 
-	rows, err := wc_l(extract_scan)
+	rows, err := wc_l(extract_scan.File)
 	must(err)
 
 	assert.Equal(t, rows, 3)
@@ -426,7 +427,9 @@ func TestPerform(t *testing.T) {
 	}
 
 	result, err := Perform(context.Background(), cfg)
-	must(err)
+	assert.NoError(t, err)
 
-	assert.Equal(t, result, nil)
+	assert.NotNil(t, result.TargetScan)
+	assert.NotNil(t, result.SourceScan)
+	assert.NotNil(t, result.SourceChanges)
 }

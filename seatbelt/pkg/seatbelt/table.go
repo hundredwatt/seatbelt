@@ -29,12 +29,20 @@ type ColumnMapping struct {
 
 type TableDefinition struct {
 	TableName      string
+	TargetTableName string
 	PrimaryKeyName string
 	Columns        []ColumnMapping
 }
 
 func (t *TableDefinition) Name() string {
 	return t.TableName
+}
+
+func (t *TableDefinition) TargetName() string {
+	if t.TargetTableName == "" {
+		return t.TableName
+	}
+	return t.TargetTableName
 }
 
 func (t *TableDefinition) PrimaryKey() string {
@@ -70,6 +78,7 @@ func (t *TableDefinition) TargetColumns() []Column {
 /* Table Interface */
 type Table interface {
 	Name() string
+	TargetName() string
 	PrimaryKey() string // TODO: Compound primary key support
 	ColumnMapping() []ColumnMapping
 	SourceColumns() []Column

@@ -44,24 +44,30 @@ type SourceHasher interface {
 }
 
 type TargetHasher interface {
+	TargetHash(data string) RowHash
+}
+
+type RowMapper interface {
 	TransformSourceToCommon(row []interface{}) (string, error)
 	TransformTargetToCommon(row []interface{}) (string, error)
-	TargetHash(data string) RowHash
 }
 
 type RowMapperAndHasher interface {
 	SourceHasher
 	TargetHasher
+	RowMapper
 }
 
 type DefaultRowMapperAndHasher struct {
 	SourceHasher
 	TargetHasher
+	RowMapper
 }
 
-func NewDefaultRowMapperAndHasher(sourceHasher SourceHasher, targetHasher TargetHasher) *DefaultRowMapperAndHasher {
+func NewDefaultRowMapperAndHasher(sourceHasher SourceHasher, targetHasher TargetHasher, rowMapper RowMapper) *DefaultRowMapperAndHasher {
 	return &DefaultRowMapperAndHasher{
 		SourceHasher: sourceHasher,
 		TargetHasher: targetHasher,
+		RowMapper:    rowMapper,
 	}
 }

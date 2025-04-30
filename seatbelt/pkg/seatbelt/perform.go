@@ -7,7 +7,13 @@ import (
 	"sync"
 )
 
-func Perform(ctx context.Context, cfg *Config) (interface{}, error) {
+type PerformIncompleteResult struct {
+	TargetScan *DataFile
+	SourceScan *DataFile
+	SourceChanges *DataFile
+}
+
+func Perform(ctx context.Context, cfg *Config) (*PerformIncompleteResult, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	sg := sync.WaitGroup{}
 
@@ -34,14 +40,22 @@ func Perform(ctx context.Context, cfg *Config) (interface{}, error) {
 		defer sg.Done()
 		target_scan, target_scan_err = cfg.Target.Scan(ctx, cfg.Table)
 	}()
-	defer target_scan.Close()
+	// defer func() {
+	// 	if target_scan != nil {
+	// 		target_scan.Close()
+	// 	}
+	// }()
 
 	sg.Add(1)
 	go func() {
 		defer sg.Done()
 		source_scan, source_scan_err = cfg.Source.Scan(ctx, cfg.Table)
 	}()
-	defer source_scan.Close()
+	// defer func() {
+	// 	if source_scan != nil {
+	// 		source_scan.Close()
+	// 	}
+	// }()
 
 	done := make(chan struct{})
 	go func() {
@@ -69,7 +83,11 @@ func Perform(ctx context.Context, cfg *Config) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer source_changes.Close()
+	// defer source_changes.Close()
 
-	return nil, nil
+	return &PerformIncompleteResult{
+		TargetScan: target_scan,
+		SourceScan: source_scan,
+		SourceChanges: source_changes,
+	}, nil
 }
