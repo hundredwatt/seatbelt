@@ -19,9 +19,3 @@ type ChangeStreamConsumer interface {
 type Target interface {
 	Scan(ctx context.Context, table Table) (*DataFile, error)
 }
-
-type Config struct {
-	Table  Table
-	Source Source
-	Target Target
-}

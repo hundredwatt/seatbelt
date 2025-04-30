@@ -65,33 +65,30 @@ func TestClickhouse_Scan(t *testing.T) {
 	source := postgres.NewPostgresSource(pgxPool)
 	target := clickhouse.NewClickHouseTarget(ch_conn)
 
-	source_scan, err := source.Scan(ctx, table)
+	result, err := seatbelt.Perform(ctx, &seatbelt.Config{
+		Table: table,
+		Source: source,
+		Target: target,
+		InitialLoad: true,
+		TestingSourceScan: true,
+	})
 	assert.NoError(t, err)
-	defer os.Remove(source_scan.Name())
 
-	source_extract_scan, err := source.ExtractScan(ctx, table)
-	assert.NoError(t, err)
-	defer os.Remove(source_extract_scan.Name())
+	assert.Equal(t, int64(25), result.SourceScan.RowCount())
+	assert.Equal(t, int64(25), result.SourceExtractScan.RowCount())
+	assert.Equal(t, int64(25), result.TargetScan.RowCount())
 
-	target_scan, err := target.Scan(ctx, table)
-	assert.NoError(t, err)
-	defer os.Remove(target_scan.Name())
+	assert_equal_lines(t, result.SourceScan.File, "1,", "1,-1361447163658550079")
+	assert_equal_lines(t, result.SourceExtractScan.File, "1,", "1,-1361447163658550079,14525862213172519373")
+	assert_equal_lines(t, result.TargetScan.File, "1,", "1,14525862213172519373")
 
-	assert.Equal(t, int64(25), source_scan.RowCount())
-	assert.Equal(t, int64(25), source_extract_scan.RowCount())
-	assert.Equal(t, int64(25), target_scan.RowCount())
+	assert_equal_lines(t, result.SourceScan.File, "5,", "5,-6809751943371760664")
+	assert_equal_lines(t, result.SourceExtractScan.File, "5,", "5,-6809751943371760664,2558505478278155530")
+	assert_equal_lines(t, result.TargetScan.File, "5,", "5,2558505478278155530")
 
-	assert_equal_lines(t, source_scan.File, "1,", "1,-1361447163658550079")
-	assert_equal_lines(t, source_extract_scan.File, "1,", "1,-1361447163658550079,14525862213172519373")
-	assert_equal_lines(t, target_scan.File, "1,", "1,14525862213172519373")
-
-	assert_equal_lines(t, source_scan.File, "5,", "5,-6809751943371760664")
-	assert_equal_lines(t, source_extract_scan.File, "5,", "5,-6809751943371760664,2558505478278155530")
-	assert_equal_lines(t, target_scan.File, "5,", "5,2558505478278155530")
-
-	assert_equal_lines(t, source_scan.File, "20,", "20,6402927007031210297")
-	assert_equal_lines(t, source_extract_scan.File, "20,", "20,6402927007031210297,10750758142674176254")
-	assert_equal_lines(t, target_scan.File, "20,", "20,10750758142674176254")
+	assert_equal_lines(t, result.SourceScan.File, "20,", "20,6402927007031210297")
+	assert_equal_lines(t, result.SourceExtractScan.File, "20,", "20,6402927007031210297,10750758142674176254")
+	assert_equal_lines(t, result.TargetScan.File, "20,", "20,10750758142674176254")
 }
 
 // --- Test Helper Functions ---
