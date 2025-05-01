@@ -71,6 +71,7 @@ class DataTarget(Target):
         return result
 
 if __name__ == "__main__":
+    os.makedirs("tmp", exist_ok=True)
     source = DataSource()
     target = DataTarget()
 
@@ -81,7 +82,6 @@ if __name__ == "__main__":
         print(key, value)
     print("\n" + ("-" * 80) + "\n")
 
-    os.makedirs("tmp", exist_ok=True)
     shadow_path = "tmp/seatbelt-data-%s" % datetime.now().strftime("%Y%m%d-%H%M%S")
     engine.save_shadow(shadow_path)
     print("Seatbelt data saved to %s" % shadow_path)
@@ -91,6 +91,7 @@ if __name__ == "__main__":
     metrics = engine.seatbelt_check(source, target)
     for key, value in metrics.items():
         print(key, value)
+
     second_shadow_path = shadow_path + "-2"
     engine.save_shadow(second_shadow_path)
     print("Seatbelt data saved to %s" % second_shadow_path)
