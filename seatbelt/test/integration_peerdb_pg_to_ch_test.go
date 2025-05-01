@@ -3,15 +3,17 @@ package test_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"seatbelt/pkg/clickhouse"
 	"seatbelt/pkg/postgres"
-	"seatbelt/pkg/seatbelt"
 	"seatbelt/pkg/row_mappers"
+	"seatbelt/pkg/seatbelt"
 	"seatbelt/test/testutil"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,7 +47,6 @@ var table_definition = &seatbelt.TableDefinition{
 	},
 }
 
-
 var table = &seatbelt.DefaultTable{
 	TableDefinition:    *table_definition,
 	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&postgres.PostgresSourceHasher{}, &clickhouse.ClickHouseTargetHasher{}, &row_mappers.PeerDBRowMapper{}),
@@ -66,12 +67,15 @@ func TestClickhouse_Scan(t *testing.T) {
 	target := clickhouse.NewClickHouseTarget(ch_conn)
 
 	result, err := seatbelt.Perform(ctx, &seatbelt.Config{
-		Table: table,
-		Source: source,
-		Target: target,
-		InitialLoad: true,
+		Table:             table,
+		Source:            source,
+		Target:            target,
+		InitialLoad:       true,
 		TestingSourceScan: true,
 	})
+	defer os.Remove(result.SourceScan.File.Name())
+	defer os.Remove(result.SourceExtractScan.File.Name())
+	defer os.Remove(result.TargetScan.File.Name())
 	assert.NoError(t, err)
 
 	assert.Equal(t, int64(25), result.SourceScan.RowCount())
@@ -89,6 +93,28 @@ func TestClickhouse_Scan(t *testing.T) {
 	assert_equal_lines(t, result.SourceScan.File, "20,", "20,6402927007031210297")
 	assert_equal_lines(t, result.SourceExtractScan.File, "20,", "20,6402927007031210297,10750758142674176254")
 	assert_equal_lines(t, result.TargetScan.File, "20,", "20,10750758142674176254")
+
+	for i := range 25 {
+		pk := i + 1
+
+		line, err := testutil.FindLineWithPrefix(result.SourceExtractScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts := strings.Split(line, ",")
+		source_hash := parts[1]
+		target_hash := parts[2]
+
+		line, err = testutil.FindLineWithPrefix(result.SourceScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts = strings.Split(line, ",")
+		source_hash_2 := parts[1]
+		assert.Equal(t, source_hash, source_hash_2, "source_hash mismatch for pk %d", pk)
+
+		line, err = testutil.FindLineWithPrefix(result.TargetScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts = strings.Split(line, ",")
+		target_hash_2 := parts[1]
+		assert.Equal(t, target_hash, target_hash_2, "target_hash mismatch for pk %d", pk)
+	}
 }
 
 // --- Test Helper Functions ---
