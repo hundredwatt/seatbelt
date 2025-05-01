@@ -7,7 +7,7 @@ from datetime import date, datetime
 import duckdb
 from duckdb.typing import *
 import pandas as pd
-from typing import Any, Optional, List, Tuple, Dict
+from typing import Any, Optional, List, Tuple, Dict, Union
 from abc import ABC, abstractmethod
 
 # Import from reference directory directly
@@ -185,10 +185,10 @@ class ValidationEngine:
         self.shadow.sql("""
             CREATE TABLE IF NOT EXISTS shadow (
                 pk BIGINT PRIMARY KEY,
-                source_signature BIGINT,
-                target_signature BIGINT,
-                incremental_source_signature BIGINT,
-                incremental_target_signature BIGINT,
+                source_signature UNION(u1 BIGINT, u2 VARCHAR),
+                target_signature UNION(u1 BIGINT, u2 VARCHAR),
+                incremental_source_signature UNION(u1 BIGINT, u2 VARCHAR),
+                incremental_target_signature UNION(u1 BIGINT, u2 VARCHAR),
                 source_operation UTINYINT,
                 target_operation UTINYINT,
                 validation_error BOOLEAN
@@ -214,10 +214,11 @@ class ValidationEngine:
             previous_destination_operation = UTINYINT_TO_OPERATION[previous_destination_operation_value]
             return check_for_validation_error(source_operation, previous_source_operation, destination_operation, previous_destination_operation, existing_validation_error, row_verified)
             
+        CHECKSUM_UNION_TYPE = duckdb.typing.DuckDBPyType(Union[int, str])
         self.shadow.create_function('determine_source_operation', determine_source_operation_wrapper, 
-                          [BIGINT, BIGINT], UTINYINT, null_handling="special")
+                          [CHECKSUM_UNION_TYPE, CHECKSUM_UNION_TYPE], UTINYINT, null_handling="special")
         self.shadow.create_function('verify_row_integrity_from_incremental_checksums', verify_row_integrity_from_incremental_checksums, 
-                          [BIGINT, BIGINT, BIGINT, BIGINT], BOOLEAN, null_handling="special")
+                          [CHECKSUM_UNION_TYPE, CHECKSUM_UNION_TYPE, CHECKSUM_UNION_TYPE, CHECKSUM_UNION_TYPE], BOOLEAN, null_handling="special")
         self.shadow.create_function('check_for_validation_error', check_for_validation_error_wrapper, 
                           [UTINYINT, UTINYINT, UTINYINT, UTINYINT, BOOLEAN, BOOLEAN], BOOLEAN, null_handling="special")
         
@@ -388,8 +389,8 @@ class ValidationEngine:
         # Update metrics
         metrics_df = self.shadow.sql("""
             SELECT
-                COUNT(source_signature) FILTER (WHERE source_signature IS NOT NULL) AS source_size,
-                COUNT(target_signature) FILTER (WHERE target_signature IS NOT NULL) AS target_size,
+                COUNT(source_signature) FILTER (WHERE source_signature.u1 IS NOT NULL OR source_signature.u2 IS NOT NULL) AS source_size,
+                COUNT(target_signature) FILTER (WHERE target_signature.u1 IS NOT NULL OR target_signature.u2 IS NOT NULL) AS target_size,
                 COUNT(*) AS seatbelt_size,
                 COUNT(validation_error) FILTER (WHERE validation_error = TRUE) AS error_count,
                 COUNT(validation_status) FILTER (WHERE validation_status = 1) AS pending_count,
