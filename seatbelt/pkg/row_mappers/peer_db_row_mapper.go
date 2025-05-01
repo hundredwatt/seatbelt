@@ -1,6 +1,9 @@
 package row_mappers
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type PeerDBRowMapper struct {
 }
@@ -27,6 +30,9 @@ func transformFloats(value interface{}) string {
 	if string_value == "NaN" {
 		return "nan"
 	}
+
+	string_value = strings.ReplaceAll(string_value, "e+", "e")
+
 	return string_value
 }
 
