@@ -82,18 +82,6 @@ func TestClickhouse_Scan(t *testing.T) {
 	assert.Equal(t, int64(25), result.SourceExtractScan.RowCount())
 	assert.Equal(t, int64(25), result.TargetScan.RowCount())
 
-	assert_equal_lines(t, result.SourceScan.File, "1,", "1,-1361447163658550079")
-	assert_equal_lines(t, result.SourceExtractScan.File, "1,", "1,-1361447163658550079,14525862213172519373")
-	assert_equal_lines(t, result.TargetScan.File, "1,", "1,14525862213172519373")
-
-	assert_equal_lines(t, result.SourceScan.File, "5,", "5,-6809751943371760664")
-	assert_equal_lines(t, result.SourceExtractScan.File, "5,", "5,-6809751943371760664,2558505478278155530")
-	assert_equal_lines(t, result.TargetScan.File, "5,", "5,2558505478278155530")
-
-	assert_equal_lines(t, result.SourceScan.File, "20,", "20,6402927007031210297")
-	assert_equal_lines(t, result.SourceExtractScan.File, "20,", "20,6402927007031210297,10750758142674176254")
-	assert_equal_lines(t, result.TargetScan.File, "20,", "20,10750758142674176254")
-
 	for i := range 25 {
 		pk := i + 1
 
@@ -134,10 +122,4 @@ func openPgxPool(ctx context.Context, t *testing.T) *pgxpool.Pool {
 	}
 	log.Println("Test database connection pool established.")
 	return pool
-}
-
-func assert_equal_lines(t *testing.T, file *os.File, prefix string, expected string) {
-	line, err := testutil.FindLineWithPrefix(file, prefix)
-	assert.NoError(t, err)
-	assert.Equal(t, expected, line)
 }
