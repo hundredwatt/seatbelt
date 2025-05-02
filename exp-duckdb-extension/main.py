@@ -9,6 +9,7 @@ EXPECTED_CHECKSUM = 93044747
 # Pass configuration when connecting
 config = {'allow_unsigned_extensions' : 'true'}
 db = duckdb.connect(config=config)
+db.sql("LOAD '/Users/jason/Code/seatbeltdata.com/seatbelt-duckdb/build/release/extension/seatbelt_duckdb/seatbelt_duckdb.duckdb_extension'")
 db.sql("CREATE TABLE data (id INTEGER, hash0 STRING, hash1 UINT32, mod8 INTEGER, random INTEGER, random_string STRING, random_float DOUBLE, random_date DATE)")
 db.sql("COPY data FROM 'tmp/data-10000000-20250501-132736.txt'")
 
@@ -35,6 +36,6 @@ def explain_analyze_and_verify(select_clause):
 
     print('-' * 100)
 
-# explain_analyze_and_verify("mod8 + random")
 explain_analyze_and_verify("count_distinct_characters_python_udf(random_string)")
 explain_analyze_and_verify("count_distinct_characters_sql(random_string)")
+explain_analyze_and_verify("seatbelt_duckdb_count_distinct_characters(random_string)")

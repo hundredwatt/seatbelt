@@ -1,0 +1,221 @@
+# name: test/sql/verify_row_integrity_types.test
+# description: test type combinations for verify_row_integrity_* functions
+# group: [seatbelt_duckdb]
+
+require seatbelt_duckdb
+
+# ---- Varchar ----
+statement ok
+SELECT verify_row_integrity_varchar('a', 'b', 'a', 'b');
+
+query T
+SELECT verify_row_integrity_varchar('a', 'b', 'a', 'b');
+----
+true
+
+query T
+SELECT verify_row_integrity_varchar('a', 'b', 'a', 'c');
+----
+0
+
+query T
+SELECT verify_row_integrity_varchar('a', 'b', 'x', 'b');
+----
+0
+
+query T
+SELECT verify_row_integrity_varchar(NULL, 'b', 'a', 'b');
+----
+true
+
+query T
+SELECT verify_row_integrity_varchar('a', NULL, 'a', 'b');
+----
+true
+
+query T
+SELECT verify_row_integrity_varchar('a', 'b', NULL, 'b');
+----
+0
+
+query T
+SELECT verify_row_integrity_varchar('a', 'b', 'a', NULL);
+----
+0
+
+query T
+SELECT verify_row_integrity_varchar(NULL, NULL, NULL, NULL);
+----
+true
+
+# ---- Integer (BIGINT) ----
+statement ok
+SELECT verify_row_integrity_int(1, 2, 1, 2);
+
+query T
+SELECT verify_row_integrity_int(1, 2, 1, 2);
+----
+true
+
+query T
+SELECT verify_row_integrity_int(1, 2, 1, 3);
+----
+0
+
+query T
+SELECT verify_row_integrity_int(1, 2, 0, 2);
+----
+0
+
+query T
+SELECT verify_row_integrity_int(NULL, 2, 1, 2);
+----
+true
+
+query T
+SELECT verify_row_integrity_int(1, NULL, 1, 2);
+----
+true
+
+query T
+SELECT verify_row_integrity_int(1, 2, NULL, 2);
+----
+0
+
+query T
+SELECT verify_row_integrity_int(1, 2, 1, NULL);
+----
+0
+
+# ---- Unsigned Integer (UBIGINT) ----
+statement ok
+SELECT verify_row_integrity_uint(10, 20, 10, 20);
+
+query T
+SELECT verify_row_integrity_uint(10, 20, 10, 20);
+----
+true
+
+query T
+SELECT verify_row_integrity_uint(10, 20, 10, 30);
+----
+0
+
+query T
+SELECT verify_row_integrity_uint(NULL, 20, 10, 20);
+----
+true
+
+query T
+SELECT verify_row_integrity_uint(10, 20, 10, NULL);
+----
+0
+
+# ---- Varchar, Integer (V, I) ----
+statement ok
+SELECT verify_row_integrity_v_i('a', 1, 'a', 1);
+
+query T
+SELECT verify_row_integrity_v_i('a', 1, 'a', 1);
+----
+true
+
+query T
+SELECT verify_row_integrity_v_i('a', 1, 'a', 2);
+----
+0
+
+query T
+SELECT verify_row_integrity_v_i('a', 1, 'b', 1);
+----
+0
+
+query T
+SELECT verify_row_integrity_v_i(NULL, 1, 'a', 1);
+----
+true
+
+query T
+SELECT verify_row_integrity_v_i('a', NULL, 'a', 1);
+----
+true
+
+query T
+SELECT verify_row_integrity_v_i('a', 1, NULL, 1);
+----
+0
+
+query T
+SELECT verify_row_integrity_v_i('a', 1, 'a', NULL);
+----
+0
+
+# ---- Varchar, Unsigned Integer (V, U) ----
+statement ok
+SELECT verify_row_integrity_v_u('a', 10, 'a', 10);
+
+query T
+SELECT verify_row_integrity_v_u('a', 10, 'a', 10);
+----
+true
+
+query T
+SELECT verify_row_integrity_v_u('a', 10, 'a', 20);
+----
+0
+
+# ---- Integer, Varchar (I, V) ----
+statement ok
+SELECT verify_row_integrity_i_v(1, 'a', 1, 'a');
+
+query T
+SELECT verify_row_integrity_i_v(1, 'a', 1, 'a');
+----
+true
+
+query T
+SELECT verify_row_integrity_i_v(1, 'a', 1, 'b');
+----
+0
+
+# ---- Integer, Unsigned Integer (I, U) ----
+statement ok
+SELECT verify_row_integrity_i_u(1, 10, 1, 10);
+
+query T
+SELECT verify_row_integrity_i_u(1, 10, 1, 10);
+----
+true
+
+query T
+SELECT verify_row_integrity_i_u(1, 10, 1, 20);
+----
+0
+
+# ---- Unsigned Integer, Varchar (U, V) ----
+statement ok
+SELECT verify_row_integrity_u_v(10, 'a', 10, 'a');
+
+query T
+SELECT verify_row_integrity_u_v(10, 'a', 10, 'a');
+----
+true
+
+query T
+SELECT verify_row_integrity_u_v(10, 'a', 10, 'b');
+----
+0
+
+# ---- Unsigned Integer, Integer (U, I) ----
+statement ok
+SELECT verify_row_integrity_u_i(10, 1, 10, 1);
+
+query T
+SELECT verify_row_integrity_u_i(10, 1, 10, 1);
+----
+true
+
+query T
+SELECT verify_row_integrity_u_i(10, 1, 10, 2);
+----
+0

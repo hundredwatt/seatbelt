@@ -1,0 +1,227 @@
+# name: test/sql/validation_logic.test
+# description: test validation logic functions in seatbelt_duckdb extension
+# group: [seatbelt_duckdb]
+
+# Require statement will ensure this test is run with this extension loaded
+require seatbelt_duckdb
+
+# Testing determine_source_operation_varchar function
+# Test test_determine_source_operation[0]: Both checksums null returns DOES_NOT_EXIST
+query I
+SELECT determine_source_operation_varchar(NULL, NULL);
+----
+1
+
+# Test test_determine_source_operation[1]: New checksum only returns INSERT
+query I
+SELECT determine_source_operation_varchar('abc123', NULL);
+----
+3
+
+# Test test_determine_source_operation[2]: Old checksum only returns DELETE
+query I
+SELECT determine_source_operation_varchar(NULL, 'abc123');
+----
+5
+
+# Test test_determine_source_operation[3]: Different checksums returns UPDATE
+query I
+SELECT determine_source_operation_varchar('abc123', 'def456');
+----
+4
+
+# Test test_determine_source_operation[4]: Same checksums returns NOOP
+query I
+SELECT determine_source_operation_varchar('abc123', 'abc123');
+----
+2
+
+# Testing determine_destination_operation function
+# Test test_determine_destination_operation[0]: Present throughout with update
+query I
+SELECT determine_destination_operation(true, true, true);
+----
+4
+
+# Test test_determine_destination_operation[1]: Present at end with update, not at start
+query I
+SELECT determine_destination_operation(true, true, false);
+----
+6
+
+# Test test_determine_destination_operation[2]: Present throughout without update
+query I
+SELECT determine_destination_operation(true, false, true);
+----
+2
+
+# Test test_determine_destination_operation[3]: New insertion
+query I
+SELECT determine_destination_operation(true, false, false);
+----
+3
+
+# Test test_determine_destination_operation[4]: Update followed by deletion
+query I
+SELECT determine_destination_operation(false, true, true);
+----
+7
+
+# Test test_determine_destination_operation[5]: Transient update
+query I
+SELECT determine_destination_operation(false, true, false);
+----
+8
+
+# Test test_determine_destination_operation[6]: Simple deletion
+query I
+SELECT determine_destination_operation(false, false, true);
+----
+5
+
+# Test test_determine_destination_operation[7]: Never existed
+query I
+SELECT determine_destination_operation(false, false, false);
+----
+1
+
+# Testing verify_row_integrity_varchar function
+# Test test_row_integrity_from_incremental_checksums[0]: No incremental checksums
+query T
+SELECT verify_row_integrity_varchar(NULL, NULL, 'abc', 'pdq');
+----
+true
+
+# Test test_row_integrity_from_incremental_checksums[1]: Matching checksums
+query T
+SELECT verify_row_integrity_varchar('abc', 'xyz', 'abc', 'xyz');
+----
+true
+
+# Test test_row_integrity_from_incremental_checksums[2]: Mismatching checksums
+query T
+SELECT verify_row_integrity_varchar('abc', 'xyz', 'abc', 'pdq');
+----
+false
+
+# Testing check_for_validation_error_base function
+# Test test_check_for_validation_error[0]: Previous change disappeared without destination change
+query T
+SELECT check_for_validation_error_base(2, 4, 2, 2, false);
+----
+true
+
+# Test test_check_for_validation_error[1]: Source exists but not in destination
+query T
+SELECT check_for_validation_error_base(4, 4, 1, 1, false);
+----
+true
+
+# Test test_check_for_validation_error[2]: Source never existed but destination shows NOOP
+query T
+SELECT check_for_validation_error_base(1, 1, 2, 2, false);
+----
+true
+
+# Test test_check_for_validation_error[3]: Existing error persists with no changes
+query T
+SELECT check_for_validation_error_base(2, 2, 2, 2, true);
+----
+true
+
+# Test test_check_for_validation_error[4]: Valid state
+query T
+SELECT check_for_validation_error_base(4, 4, 4, 4, false);
+----
+false
+
+# Test test_check_for_validation_error[5]: NOOP source with INSERT history but missing destination
+query T
+SELECT check_for_validation_error_base(2, 3, 1, 1, false);
+----
+true
+
+# Test test_check_for_validation_error[6]: UPDATE source with INSERT history but missing destination
+query T
+SELECT check_for_validation_error_base(4, 3, 1, 1, false);
+----
+true
+
+# Test test_check_for_validation_error[7]: everything is NOOP
+query T
+SELECT check_for_validation_error_base(2, 2, 2, 2, false);
+----
+false
+
+# Test test_check_for_validation_error[8]: Corrupted destination
+query T
+SELECT check_for_validation_error_base(2, 2, 4, 4, false);
+----
+true
+
+# Test test_check_for_validation_error[9]: Deletes never seen by the destination
+query T
+SELECT check_for_validation_error_base(1, 5, 1, 1, false);
+----
+false
+
+# Test test_check_for_validation_error[10]: Delete that failed to replicate
+query T
+SELECT check_for_validation_error_base(1, 5, 2, 2, false);
+----
+true
+
+# Test test_check_for_validation_error[11]: Destination change when there's a validation error (assume it's a repair operation)
+query T
+SELECT check_for_validation_error_base(2, 2, 4, 2, true);
+----
+false
+
+# Testing check_for_validation_error_with_row_integrity function
+# Test test_check_for_validation_error_with_row_integrity[0]: Corrupted destination
+query T
+SELECT check_for_validation_error_with_row_integrity(2, 4, 3, 3, false, false);
+----
+true
+
+# Test test_check_for_validation_error_with_row_integrity[1]: Initial validation run
+query T
+SELECT check_for_validation_error_with_row_integrity(3, 3, 1, 1, false, true);
+----
+false
+
+# Test test_check_for_validation_error_with_row_integrity[2]: Initial validation run
+query T
+SELECT check_for_validation_error_with_row_integrity(3, 3, 1, 1, false, true);
+----
+false
+
+# Test test_check_for_validation_error_with_row_integrity[3]: Incorrect row in initial validation run
+query T
+SELECT check_for_validation_error_with_row_integrity(2, 2, 3, 3, false, false);
+----
+true
+
+# Test test_check_for_validation_error_with_row_integrity[4]: Pending update in source
+query T
+SELECT check_for_validation_error_with_row_integrity(4, 2, 2, 2, false, false);
+----
+false
+
+# Test test_check_for_validation_error_with_row_integrity[5]: Previous validation error persists
+query T
+SELECT check_for_validation_error_with_row_integrity(2, 2, 2, 2, true, false);
+----
+true
+
+# Test test_check_for_validation_error_with_row_integrity[6]: Destination corruption when there's an existing validation error, row not verified
+query T
+SELECT check_for_validation_error_with_row_integrity(2, 2, 4, 2, true, false);
+----
+true
+
+# Test test_check_for_validation_error_with_row_integrity[7]: Destination repaired
+query T
+SELECT check_for_validation_error_with_row_integrity(2, 2, 4, 2, true, true);
+----
+false

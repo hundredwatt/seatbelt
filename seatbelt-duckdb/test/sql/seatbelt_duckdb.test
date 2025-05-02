@@ -1,0 +1,41 @@
+# name: test/sql/seatbelt_duckdb.test
+# description: test seatbelt_duckdb extension
+# group: [seatbelt_duckdb]
+
+# Before we load the extension, this will fail
+statement error
+SELECT seatbelt_duckdb_count_distinct_characters('Sam');
+----
+Catalog Error: Scalar Function with name seatbelt_duckdb_count_distinct_characters does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require seatbelt_duckdb
+
+# Test the count distinct characters function
+query I
+SELECT seatbelt_duckdb_count_distinct_characters('hello');
+----
+4
+
+query I
+SELECT seatbelt_duckdb_count_distinct_characters('');
+----
+0
+
+query I
+SELECT seatbelt_duckdb_count_distinct_characters('aaa');
+----
+1
+
+query I
+SELECT seatbelt_duckdb_count_distinct_characters('abcdefg');
+----
+7
+
+# Test with multiple rows
+query I
+SELECT seatbelt_duckdb_count_distinct_characters(val) FROM (VALUES ('hello'), ('world'), ('duckdb')) t(val) ORDER BY val;
+----
+5
+4
+5
