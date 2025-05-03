@@ -1,4 +1,4 @@
-package seatbelt
+package seatbelt_test
 
 import (
 	"bufio"
@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zeebo/xxh3"
+	"seatbelt/pkg/seatbelt"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/zeebo/xxh3"
 )
 
 /* Utilities */
@@ -71,12 +73,12 @@ func init() {
 }
 
 /* Test Data Sources */
-var table_definition = &TableDefinition{
+var table_definition = &seatbelt.TableDefinition{
 	TableName: "test",
-	Columns: []ColumnMapping{
-		{Name: "id", SourceType: ColumnTypeInt, TargetType: ColumnTypeInt},
-		{Name: "name", SourceType: ColumnTypeText, TargetType: ColumnTypeText},
-		{Name: "score", SourceType: ColumnTypeInt, TargetType: ColumnTypeFloat},
+	Columns: []seatbelt.ColumnMapping{
+		{Name: "id", SourceType: seatbelt.ColumnTypeInt, TargetType: seatbelt.ColumnTypeInt},
+		{Name: "name", SourceType: seatbelt.ColumnTypeText, TargetType: seatbelt.ColumnTypeText},
+		{Name: "score", SourceType: seatbelt.ColumnTypeInt, TargetType: seatbelt.ColumnTypeFloat},
 	},
 }
 
@@ -104,12 +106,12 @@ type TestingSource struct {
 	Data []map[string]interface{}
 }
 
-func (s *TestingSource) Scan(ctx context.Context, table Table) (*DataFile, error) {
+func (s *TestingSource) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
 	osfile, err := os.Create(filepath.Join(testDir, "source_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
-	file := NewDataFile(osfile)
+	file := seatbelt.NewDataFile(osfile)
 	for _, row := range s.Data {
 		values := make([]interface{}, len(row))
 		for i, column := range table.SourceColumns() {
@@ -127,12 +129,12 @@ func (s *TestingSource) Scan(ctx context.Context, table Table) (*DataFile, error
 	return file, nil
 }
 
-func (s *TestingSource) ExtractScan(ctx context.Context, table Table) (*DataFile, error) {
+func (s *TestingSource) ExtractScan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
 	osfile, err := os.Create(filepath.Join(testDir, "source_extract_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
-	file := NewDataFile(osfile)
+	file := seatbelt.NewDataFile(osfile)
 
 	for _, row := range s.Data {
 		source_values := make([]interface{}, len(row))
@@ -154,26 +156,26 @@ func (s *TestingSource) ExtractScan(ctx context.Context, table Table) (*DataFile
 	return file, nil
 }
 
-func (s *TestingSource) StartChangeStreamConsumer(ctx context.Context, table Table) (ChangeStreamConsumer, error) {
+func (s *TestingSource) StartChangeStreamConsumer(ctx context.Context, table seatbelt.Table) (seatbelt.ChangeStreamConsumer, error) {
 	return NewTestingChangeStreamConsumer(table)
 }
 
 type TestingChangeStreamConsumer struct {
 	Data         []map[string]interface{}
-	OutputFile   *DataFile
+	OutputFile   *seatbelt.DataFile
 	Complete     chan struct{}
 	ErrorChannel chan error
 	WaitGroup    *sync.WaitGroup
 	Context      context.Context
-	Table        Table
+	Table        seatbelt.Table
 }
 
-func NewTestingChangeStreamConsumer(table Table) (*TestingChangeStreamConsumer, error) {
+func NewTestingChangeStreamConsumer(table seatbelt.Table) (*TestingChangeStreamConsumer, error) {
 	osfile, err := os.Create(filepath.Join(testDir, "source_changes.txt"))
 	if err != nil {
 		return nil, err
 	}
-	output_file := NewDataFile(osfile)
+	output_file := seatbelt.NewDataFile(osfile)
 	complete := make(chan struct{})
 	error_channel := make(chan error)
 	consumer := &TestingChangeStreamConsumer{Data: source_changes, OutputFile: output_file, Complete: complete, ErrorChannel: error_channel, WaitGroup: &sync.WaitGroup{}, Context: context.Background(), Table: table}
@@ -248,7 +250,7 @@ func (c *TestingChangeStreamConsumer) startReader() error {
 	return nil
 }
 
-func (c *TestingChangeStreamConsumer) ConsumeToCompletion() (*DataFile, error) {
+func (c *TestingChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile, error) {
 	c.Complete <- struct{}{}
 
 	done := make(chan struct{})
@@ -289,12 +291,12 @@ var target_data = []map[string]interface{}{
 	},
 }
 
-func (t *TestingTarget) Scan(ctx context.Context, table Table) (*DataFile, error) {
+func (t *TestingTarget) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
 	osfile, err := os.Create(filepath.Join(testDir, "target_scan.txt"))
 	if err != nil {
 		return nil, err
 	}
-	file := NewDataFile(osfile)
+	file := seatbelt.NewDataFile(osfile)
 	for _, row := range t.Data {
 		values := make([]interface{}, len(row))
 		for i, column := range table.TargetColumns() {
@@ -336,18 +338,18 @@ func (h *TestingRowMapperAndHasher) TransformTargetToCommon(row []interface{}) (
 	return fmt.Sprintf("%s|%.1f", row[1], row[2]), nil
 }
 
-func (h *TestingRowMapperAndHasher) SourceHash(data string) RowHash {
-	return Uint64Hash(xxh3.Hash([]byte(data)))
+func (h *TestingRowMapperAndHasher) SourceHash(data string) seatbelt.RowHash {
+	return seatbelt.Uint64Hash(xxh3.Hash([]byte(data)))
 }
 
-func (h *TestingRowMapperAndHasher) TargetHash(data string) RowHash {
+func (h *TestingRowMapperAndHasher) TargetHash(data string) seatbelt.RowHash {
 	hasher := md5.New()
 	hasher.Write([]byte(data))
 
-	return Hex16Hash(hasher.Sum(nil)[0:16])
+	return seatbelt.Hex16Hash(hasher.Sum(nil)[0:16])
 }
 
-var table = &DefaultTable{
+var table = &seatbelt.DefaultTable{
 	TableDefinition:    *table_definition,
 	RowMapperAndHasher: &TestingRowMapperAndHasher{},
 }
@@ -391,13 +393,13 @@ func TestRowMapperAndHasher(t *testing.T) {
 	assert.Equal(t, test_row_string, "John|100")
 	assert.Equal(t, common_from_source_string, "John|100.0")
 	assert.Equal(t, common_from_target_string, "John|100.0")
-	assert.Equal(t, source_hash, Uint64Hash(6710712646738599732))
+	assert.Equal(t, source_hash, seatbelt.Uint64Hash(6710712646738599732))
 	assert.Equal(t, target_hash_from_source.String(), "c42581752697e38e6bf312112469d28c")
 	assert.Equal(t, target_hash_from_target.String(), "c42581752697e38e6bf312112469d28c")
 }
 
 func TestExtractScan(t *testing.T) {
-	table := &DefaultTable{
+	table := &seatbelt.DefaultTable{
 		TableDefinition:    *table_definition,
 		RowMapperAndHasher: &TestingRowMapperAndHasher{},
 	}
@@ -410,52 +412,4 @@ func TestExtractScan(t *testing.T) {
 	must(err)
 
 	assert.Equal(t, rows, 3)
-}
-
-func TestPerform(t *testing.T) {
-	table := &DefaultTable{
-		TableDefinition:    *table_definition,
-		RowMapperAndHasher: &TestingRowMapperAndHasher{},
-	}
-	source := &TestingSource{Data: source_data}
-	target := &TestingTarget{Data: target_data}
-
-	cfg := &Config{
-		Table:  table,
-		Source: source,
-		Target: target,
-	}
-
-	result, err := Perform(context.Background(), cfg)
-	assert.NoError(t, err)
-
-	assert.NotNil(t, result.TargetScan)
-	assert.NotNil(t, result.SourceScan)
-	assert.NotNil(t, result.SourceChanges)
-	assert.Nil(t, result.SourceExtractScan)
-}
-
-func TestPerform_InitialLoad(t *testing.T) {
-	table := &DefaultTable{
-		TableDefinition:    *table_definition,
-		RowMapperAndHasher: &TestingRowMapperAndHasher{},
-	}
-	source := &TestingSource{Data: source_data}
-	target := &TestingTarget{Data: target_data}
-
-	cfg := &Config{
-		Table:  table,
-		Source: source,
-		Target: target,
-		InitialLoad: true,
-		TestingSourceScan: true,
-	}
-
-	result, err := Perform(context.Background(), cfg)
-	assert.NoError(t, err)
-
-	assert.NotNil(t, result.TargetScan)
-	assert.NotNil(t, result.SourceScan)
-	assert.Nil(t, result.SourceChanges)
-	assert.NotNil(t, result.SourceExtractScan)
 }

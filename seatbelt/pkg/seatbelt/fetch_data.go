@@ -13,16 +13,17 @@ type Config struct {
 	Target            Target
 	InitialLoad       bool
 	TestingSourceScan bool
+	ShadowPath        string
 }
 
-type PerformIncompleteResult struct {
+type DataFileSet struct {
 	TargetScan        *DataFile
 	SourceScan        *DataFile
 	SourceChanges     *DataFile
 	SourceExtractScan *DataFile
 }
 
-func Perform(ctx context.Context, cfg *Config) (*PerformIncompleteResult, error) {
+func FetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
@@ -36,10 +37,10 @@ func Perform(ctx context.Context, cfg *Config) (*PerformIncompleteResult, error)
 		return initialLoad(ctx, cfg, cancel)
 	}
 
-	return defaultPerform(ctx, cfg, cancel)
+	return defaultFetchData(ctx, cfg, cancel)
 }
 
-func defaultPerform(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*PerformIncompleteResult, error) {
+func defaultFetchData(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*DataFileSet, error) {
 	sg := sync.WaitGroup{}
 
 	var consumer ChangeStreamConsumer
@@ -93,14 +94,14 @@ func defaultPerform(ctx context.Context, cfg *Config, cancel context.CancelFunc)
 		return nil, err
 	}
 
-	return &PerformIncompleteResult{
+	return &DataFileSet{
 		TargetScan:    target_scan,
 		SourceScan:    source_scan,
 		SourceChanges: source_changes,
 	}, nil
 }
 
-func initialLoad(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*PerformIncompleteResult, error) {
+func initialLoad(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*DataFileSet, error) {
 	sg := sync.WaitGroup{}
 
 	// TODO - advance consumer log position to reasonable value
@@ -158,7 +159,7 @@ func initialLoad(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*
 		return nil, source_extract_scan_err
 	}
 
-	return &PerformIncompleteResult{
+	return &DataFileSet{
 		TargetScan:        target_scan,
 		SourceScan:        source_scan,
 		SourceExtractScan: source_extract_scan,

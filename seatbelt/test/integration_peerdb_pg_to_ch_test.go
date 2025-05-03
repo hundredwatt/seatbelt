@@ -66,7 +66,7 @@ func TestClickhouse_Scan(t *testing.T) {
 	source := postgres.NewPostgresSource(pgxPool)
 	target := clickhouse.NewClickHouseTarget(ch_conn)
 
-	result, err := seatbelt.Perform(ctx, &seatbelt.Config{
+	result, err := seatbelt.FetchData(ctx, &seatbelt.Config{
 		Table:             table,
 		Source:            source,
 		Target:            target,
