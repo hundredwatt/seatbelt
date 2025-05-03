@@ -1,0 +1,46 @@
+# Example Seatbelt Configuration for Local Docker Test Environment
+
+# --- Connection Strings ---
+# Matches the services defined in seatbelt/test/docker-compose.yml
+
+source_connection_string: "postgres://postgres:postgres@localhost:55810/seatbelt"
+target_connection_string: "clickhouse://default:pass@localhost:9000/peerdb?dial_timeout=5s&read_timeout=20s&password=pass"
+
+# --- Row Mapper ---
+# Specifies how to map and hash rows. 'peer_db' is the currently supported one.
+row_mapper_name: "peer_db"
+
+# --- Table Configuration ---
+# Source table name (including schema if applicable)
+table_name: "public.data_proof_test"
+
+# Target table name (optional, if different from source_table_name)
+target_table_name: "peerdb.public_data_proof"
+
+# Primary key column name (required)
+primary_key_name: "id"
+
+# --- Column Mapping ---
+# Define how columns map between source and target, including their types.
+# These should match the table definitions in seatbelt/test/postgres-init/init.sql
+# and seatbelt/test/clickhouse-init/init.sql
+columns:
+  - name: "smallint_col"
+    source_type: "smallint"
+    target_type: "smallint"
+  - name: "bigint_col"
+    source_type: "bigint"
+    target_type: "bigint"
+  - name: "float_col"
+    source_type: "float"
+    target_type: "float"
+  - name: "double_col"
+    source_type: "double"
+    target_type: "double"
+# Note: Primary key column ('id' in this case) is typically handled implicitly
+# by the row mapper or core logic, but ensure it exists in both tables.
+
+# --- Shadow Table Path (Optional) ---
+# Path to the DuckDB file for the shadow table.
+# If empty or omitted, an in-memory database will be used.
+shadow_path: "seatbelt.db" 

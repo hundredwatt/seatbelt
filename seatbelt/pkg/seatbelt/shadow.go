@@ -37,30 +37,27 @@ const (
 	StatusGone    int = 3
 )
 
-func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*ValidationMetrics, error) {
-	if cfg.ShadowPath == "" {
-		cfg.ShadowPath = ":memory:"
+// setupDuckDB connects to DuckDB and initializes the shadow table
+func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
+	if shadowPath == "" {
+		shadowPath = ":memory:"
 	}
 
 	// Connect to DuckDB, allowing unsigned extensions
-	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=true", cfg.ShadowPath))
+	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=true", shadowPath))
 	if err != nil {
 		log.Printf("Error opening DuckDB: %v", err)
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
-	defer db.Close()
 
 	// Load the seatbelt_duckdb extension
 	_, err = db.ExecContext(ctx, "LOAD seatbelt_duckdb;")
 	if err != nil {
 		log.Printf("Error loading seatbelt_duckdb extension: %v", err)
 		// Continue anyway, maybe it's already loaded or built-in
-		// return nil, fmt.Errorf("failed to load seatbelt_duckdb extension: %w", err)
 	}
 
 	// Ensure shadow table exists
-	// NOTE: Using BIGINT for signatures initially. Adjust if VARCHAR or UNION types are needed.
-	// The UNION type from Python isn't directly mapable here without more complex handling.
 	_, err = db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS shadow (
             pk BIGINT PRIMARY KEY,
@@ -78,48 +75,56 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 		return nil, fmt.Errorf("failed to create shadow table: %w", err)
 	}
 
+	return db, nil
+}
+
+// createDataViews creates temporary views for source, target, and incremental scans
+func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet) error {
 	// Create VIEWs for the source, target, and incremental scans
 	createSourceViewQuery := fmt.Sprintf(`
 		CREATE TEMP VIEW source AS 
 		SELECT 
-			CAST(column0 AS BIGINT) AS pk,
-			CAST(column1 AS BIGINT) AS source_signature
+			CAST(pk AS BIGINT) AS pk,
+			CAST(source_hash AS BIGINT) AS source_signature
 		FROM '%s';
 	`, data_files.SourceScan.File.Name())
 	createTargetViewQuery := fmt.Sprintf(`
 		CREATE TEMP VIEW target AS 
 		SELECT 
-			CAST(column0 AS BIGINT) AS pk,
-			CAST(column1 AS UBIGINT) AS target_signature
+			CAST(pk AS BIGINT) AS pk,
+			CAST(target_hash AS UBIGINT) AS target_signature
 		FROM '%s';
 	`, data_files.TargetScan.File.Name())
 	createIncrementalViewQuery := fmt.Sprintf(`
 		CREATE TEMP VIEW incremental AS 
 		SELECT 
-			CAST(column0 AS BIGINT) AS pk,
-			CAST(column1 AS BIGINT) AS source_signature,
-			CAST(column2 AS UBIGINT) AS target_signature
+			CAST(pk AS BIGINT) AS pk,
+			CAST(source_hash AS BIGINT) AS source_signature,
+			CAST(target_hash AS UBIGINT) AS target_signature
 		FROM '%s';
 	`, data_files.SourceChanges.File.Name())
+
 	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery} {
-		_, err = db.ExecContext(ctx, query)
+		_, err := db.ExecContext(ctx, query)
 		if err != nil {
 			log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
-			return nil, fmt.Errorf("failed to create view: %w", err)
+			return fmt.Errorf("failed to create view: %w", err)
 		}
 	}
 
-	// Main UPSERT logic
-	// Using *_int versions of functions assuming BIGINT signatures.
-	// Use check_for_validation_error_with_row_integrity which matches the Python logic.
-	upsertQuery := `
+	return nil
+}
+
+// getUpsertQuery returns the main UPSERT query used to update the shadow table
+func getUpsertQuery() string {
+	return `
         INSERT INTO shadow
         SELECT
             COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
             source.source_signature AS source_signature,
             target.target_signature AS target_signature,
-            incremental.source_signature AS incremental_source_signature,
-            incremental.target_signature AS incremental_target_signature,
+            COALESCE(incremental.source_signature, shadow.incremental_source_signature) AS incremental_source_signature,
+            COALESCE(incremental.target_signature, shadow.incremental_target_signature) AS incremental_target_signature,
             -- Use specific signature type function, assuming INT here
             determine_source_operation_int(
                 source.source_signature,
@@ -158,16 +163,11 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
             target_operation = excluded.target_operation,
             validation_error = excluded.validation_error;
     `
+}
 
-	_, err = db.ExecContext(ctx, upsertQuery)
-	if err != nil {
-		log.Printf("Error executing UPSERT query: %v\nQuery:\n%s", err, upsertQuery)
-		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
-	}
-
-	// Logic to calculate validation_status inline (replicating Python UDF)
-	// Assumes verify_row_integrity_int is the correct function for the signature types
-	validationStatusCaseStmt := `
+// getValidationStatusCaseStmt returns the CASE statement for calculating validation status
+func getValidationStatusCaseStmt() string {
+	return `
         CASE
             WHEN validation_error THEN %[4]d -- StatusError
             ELSE
@@ -196,25 +196,19 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
                 END
         END
     `
-	validationStatusLogic := fmt.Sprintf(validationStatusCaseStmt,
+}
+
+// getValidationStatusLogic formats the validation status case statement with constants
+func getValidationStatusLogic() string {
+	return fmt.Sprintf(getValidationStatusCaseStmt(),
 		StatusValid, StatusPending, StatusGone, StatusError, // 1, 2, 3, 4
 		OpNoop, OpDoesNotExist, OpDelete, // 5, 6, 7
 	)
+}
 
-	// Delete GONE rows
-	deleteQuery := fmt.Sprintf(`
-        DELETE FROM shadow
-        WHERE (%s) = %[2]d -- StatusGone
-    `, validationStatusLogic, StatusGone)
-
-	_, err = db.ExecContext(ctx, deleteQuery)
-	if err != nil {
-		log.Printf("Error deleting GONE rows: %v\nQuery:\n%s", err, deleteQuery)
-		return nil, fmt.Errorf("failed to delete gone rows: %w", err)
-	}
-
-	// Calculate metrics
-	metricsQuery := fmt.Sprintf(`
+// getMetricsQuery returns the query for calculating validation metrics
+func getMetricsQuery(validationStatusLogic string) string {
+	return fmt.Sprintf(`
         WITH StatusCTE AS (
             SELECT
                 *,
@@ -230,6 +224,92 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
             COUNT(*) FILTER (WHERE validation_status = %[3]d) AS valid_count   -- StatusValid
         FROM StatusCTE;
 	`, validationStatusLogic, StatusPending, StatusValid)
+}
+
+// ExplainAnalyzeUpdateShadow runs the shadow update query with EXPLAIN ANALYZE and returns the plan
+func ExplainAnalyzeUpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (string, error) {
+	// Setup the database and create views
+	db, err := setupDuckDB(ctx, cfg.ShadowPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to setup DuckDB: %w", err)
+	}
+	defer db.Close()
+
+	// Create views for data files
+	err = createDataViews(ctx, db, data_files)
+	if err != nil {
+		return "", fmt.Errorf("failed to create data views: %w", err)
+	}
+
+	// Get the upsert query and prepend EXPLAIN ANALYZE
+	upsertQuery := getUpsertQuery()
+	explainQuery := fmt.Sprintf("EXPLAIN ANALYZE %s", upsertQuery)
+
+	// Run the EXPLAIN ANALYZE query
+	rows, err := db.QueryContext(ctx, explainQuery)
+	if err != nil {
+		log.Printf("Error executing EXPLAIN ANALYZE query: %v\nQuery:\n%s", err, explainQuery)
+		return "", fmt.Errorf("failed to execute EXPLAIN ANALYZE query: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect the output
+	var plan string
+	for rows.Next() {
+		var label string
+		var line string
+		if err := rows.Scan(&label, &line); err != nil {
+			return "", fmt.Errorf("error scanning explain result: %w", err)
+		}
+		plan += fmt.Sprintf("%s:\n%s\n", label, line)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("error iterating through explain results: %w", err)
+	}
+
+	return plan, nil
+}
+
+func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*ValidationMetrics, error) {
+	// Setup the database and create views
+	db, err := setupDuckDB(ctx, cfg.ShadowPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup DuckDB: %w", err)
+	}
+	defer db.Close()
+
+	// Create views for data files
+	err = createDataViews(ctx, db, data_files)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create data views: %w", err)
+	}
+
+	// Get and execute the upsert query
+	upsertQuery := getUpsertQuery()
+	_, err = db.ExecContext(ctx, upsertQuery)
+	if err != nil {
+		log.Printf("Error executing UPSERT query: %v\nQuery:\n%s", err, upsertQuery)
+		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
+	}
+
+	// Logic to calculate validation_status inline
+	validationStatusLogic := getValidationStatusLogic()
+
+	// Delete GONE rows
+	deleteQuery := fmt.Sprintf(`
+        DELETE FROM shadow
+        WHERE (%s) = %[2]d -- StatusGone
+    `, validationStatusLogic, StatusGone)
+
+	_, err = db.ExecContext(ctx, deleteQuery)
+	if err != nil {
+		log.Printf("Error deleting GONE rows: %v\nQuery:\n%s", err, deleteQuery)
+		return nil, fmt.Errorf("failed to delete gone rows: %w", err)
+	}
+
+	// Calculate metrics
+	metricsQuery := getMetricsQuery(validationStatusLogic)
 
 	metrics := &ValidationMetrics{}
 	row := db.QueryRowContext(ctx, metricsQuery)

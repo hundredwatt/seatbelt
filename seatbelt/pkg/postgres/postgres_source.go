@@ -52,10 +52,10 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 	query := fmt.Sprintf(`
 		COPY (
 			SELECT 
-				%s,
-				hashtextextended((%s), %d) AS computed_hash 
+				%s as pk,
+				hashtextextended((%s), %d) AS source_hash
 			FROM %s
-		) TO STDOUT WITH (FORMAT csv)
+		) TO STDOUT WITH (FORMAT csv, HEADER)
 	`,
 		table.PrimaryKey(),
 		concatenationExpression,

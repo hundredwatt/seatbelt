@@ -30,6 +30,12 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	}
 	file := seatbelt.NewDataFile(osfile)
 
+	// Write header
+	header := fmt.Sprintf("%s,%s\n", "pk", "target_hash")
+	if _, err := file.File.WriteString(header); err != nil {
+		return nil, fmt.Errorf("failed to write header to file: %w", err)
+	}
+
 	// Build column list for SELECT
 	var columnNames []string
 	for _, col := range table.TargetColumns() {
@@ -46,7 +52,9 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 
 	// Construct query to get primary key values and compute hashes
 	query := fmt.Sprintf(`
-		SELECT %s, xxh3(%s) AS computed_hash
+		SELECT 
+			%s AS pk,
+			xxh3(%s) AS target_hash
 		FROM %s
 	`, table.PrimaryKey(), concatExpr, table.TargetName())
 

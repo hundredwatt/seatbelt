@@ -23,15 +23,15 @@ type Column struct {
 
 type ColumnMapping struct {
 	Name       string
-	SourceType ColumnType
-	TargetType ColumnType
+	SourceType ColumnType `yaml:"source_type"`
+	TargetType ColumnType `yaml:"target_type"`
 }
 
 type TableDefinition struct {
-	TableName      string
+	TableName       string
 	TargetTableName string
-	PrimaryKeyName string
-	Columns        []ColumnMapping
+	PrimaryKeyName  string
+	Columns         []ColumnMapping
 }
 
 func (t *TableDefinition) Name() string {

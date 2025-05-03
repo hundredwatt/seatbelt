@@ -450,26 +450,35 @@ func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile
 	}
 	log.Printf("Completion requested. Waiting for replication loop to reach target LSN: %s", c.targetLSN.String())
 
+	// Set up a ticker to periodically send WAL messages to advance the LSN
+	walAdvanceTicker := time.NewTicker(1 * time.Second)
+	defer walAdvanceTicker.Stop()
+
 	// 3. Wait for the loop to reach the target LSN or exit with an error
-	select {
-	case <-c.targetLSNReached:
-		log.Printf("Replication loop confirmed target LSN %s reached.", c.targetLSN.String())
-		// Proceed to final write
-	case err := <-c.errorChan:
-		log.Printf("Replication loop exited with error while waiting for LSN: %v", err)
-		_ = c.Close() // Best effort close
-		return nil, fmt.Errorf("replication loop failed during completion: %w", err)
-	case <-c.ctx.Done():
-		log.Printf("Context cancelled while waiting for target LSN: %v", c.ctx.Err())
-		_ = c.Close() // Best effort close
-		return nil, fmt.Errorf("context cancelled during completion: %w", c.ctx.Err())
-		// TODO: Add a timeout here? Could wait indefinitely if loop hangs before reaching LSN.
-		// case <-time.After(30 * time.Second): // Example timeout
-		// 	log.Println("Timeout waiting for replication loop to reach target LSN.")
-		// 	_ = c.Close()
-		// 	return nil, fmt.Errorf("timeout waiting for target LSN")
+	for {
+		select {
+		case <-c.targetLSNReached:
+			log.Printf("Replication loop confirmed target LSN %s reached.", c.targetLSN.String())
+			// Proceed to final write
+			goto finalizeData
+		case err := <-c.errorChan:
+			log.Printf("Replication loop exited with error while waiting for LSN: %v", err)
+			_ = c.Close() // Best effort close
+			return nil, fmt.Errorf("replication loop failed during completion: %w", err)
+		case <-c.ctx.Done():
+			log.Printf("Context cancelled while waiting for target LSN: %v", c.ctx.Err())
+			_ = c.Close() // Best effort close
+			return nil, fmt.Errorf("context cancelled during completion: %w", c.ctx.Err())
+		case <-walAdvanceTicker.C:
+			// Force WAL advancement to help reach target LSN
+			log.Printf("Sending WAL message to advance LSN toward target %s", c.targetLSN.String())
+			if err := c.forceWalIncrement(); err != nil {
+				log.Printf("Error forcing WAL increment: %v. Will retry.", err)
+			}
+		}
 	}
 
+finalizeData:
 	// 4. Write the final batch of results
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -524,7 +533,7 @@ func (c *PostgresChangeStreamConsumer) openDataFile() error {
 	dataFile := seatbelt.NewDataFile(osfile)
 
 	// Write header
-	header := fmt.Sprintf("%s,%s,%s\n", c.table.PrimaryKey(), "source_hash", "target_hash")
+	header := fmt.Sprintf("%s,%s,%s\n", "pk", "source_hash", "target_hash")
 	if _, err := dataFile.File.WriteString(header); err != nil {
 		dataFile.Close() // Close file on error
 		return fmt.Errorf("failed to write header to CDC result file: %w", err)
