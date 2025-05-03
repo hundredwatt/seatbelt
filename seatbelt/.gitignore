@@ -1,4 +1,4 @@
 tmp/
-.venv
 test/.postgres_data
 test/.clickhouse_data
+build/

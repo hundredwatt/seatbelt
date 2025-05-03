@@ -1,27 +1,22 @@
-.PHONY: all
+.PHONY: build build-intel install copy-to-mini clean
 
-up:
-	docker-compose -f test/docker-compose.yml up -d
+build: ensure-build-dir
+	go build -o build/seatbelt ./cmd/seatbelt
 
-down:
-	docker-compose -f test/docker-compose.yml down
+build-intel: ensure-build-dir
+	GOOS=darwin GOARCH=amd64 go build -o build/seatbelt-intel ./cmd/seatbelt
+
+install:
+	go install -o build/seatbelt ./cmd/seatbelt
+
+copy-to-mini: build-intel
+	scp build/seatbelt-intel macmini.lan:~/seatbelt
+	ssh macmini.lan "chmod +x ~/seatbelt && sudo mv ~/seatbelt /usr/local/bin/"
+
+ensure-build-dir:
+	mkdir -p build
 
 clean:
-	docker-compose -f test/docker-compose.yml down
-	rm -rf test/.postgres_data
-	rm -rf test/.clickhouse_data
+	rm -rf build
 
-logs:
-	docker-compose -f test/docker-compose.yml logs -f
-
-psql:
-	docker exec -it seatbelt-postgres psql -U postgres -d seatbelt
-
-clickhouse-client:
-	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb --password pass
-
-test:
-	go test -v ./...
-
-build:
-	go build -o seatbelt ./cmd/seatbelt/main.go
+all: clean install copy-to-mini

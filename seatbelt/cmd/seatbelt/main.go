@@ -33,7 +33,7 @@ type AppConfig struct {
 	TargetTableName        string                   `yaml:"target_table_name"` // Optional
 	PrimaryKeyName         string                   `yaml:"primary_key_name"`
 	Columns                []seatbelt.ColumnMapping `yaml:"columns"`
-	ShadowPath             string                   `yaml:"shadow_path"` // Optional
+	ShadowPath             string                   `yaml:"seatbelt_data_path"` // Optional
 }
 
 var (

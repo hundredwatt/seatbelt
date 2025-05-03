@@ -43,4 +43,4 @@ columns:
 # --- Shadow Table Path (Optional) ---
 # Path to the DuckDB file for the shadow table.
 # If empty or omitted, an in-memory database will be used.
-shadow_path: "seatbelt.db" 
+seatbelt_data_path: "tmp/seatbelt-examples-config.db" 
