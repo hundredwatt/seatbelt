@@ -525,7 +525,9 @@ func (c *PostgresChangeStreamConsumer) openDataFile() error {
 	}
 
 	_, baseTableName := parseSchemaTable(c.table.Name())
-	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-cdc-%s-*.csv", baseTableName))
+	// Get temp directory from environment variable or use default
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-cdc-%s-*.csv", baseTableName))
 	if err != nil {
 		return fmt.Errorf("failed to create temp file for CDC results: %w", err)
 	}

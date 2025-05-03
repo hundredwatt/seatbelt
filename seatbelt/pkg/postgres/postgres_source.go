@@ -21,7 +21,8 @@ func NewPostgresSource(conn *pgxpool.Pool) *PostgresSource {
 }
 
 func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
-	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-scan-%s-*.csv", table.Name()))
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-scan-%s-*.csv", table.Name()))
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +88,8 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 }
 
 func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
-	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-extract-scan-%s-*.csv", table.Name()))
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-extract-scan-%s-*.csv", table.Name()))
 	if err != nil {
 		return nil, err
 	}

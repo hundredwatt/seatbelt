@@ -43,6 +43,7 @@ The application behavior is controlled by `config.yaml`:
 *   `hash_seed`: The seed value used for both `hashtextextended` (SQL) and `PostgresHashtextextend` (Go).
 *   `output`: Paths for the `select_csv_path` and `replication_csv_path` output files.
 *   `debug`: Boolean flag to enable verbose debug logging.
+*   `environment`: Map of environment variables to set if not already defined in the system environment.
 
 ## Packages
 
@@ -88,6 +89,22 @@ Integration tests are located in the `test/` directory.
     *   Navigate to the project root directory.
     *   Execute: `bash test/run_tests.sh`
     *   To stop containers after the test run: `bash test/run_tests.sh --down`
+
+## Environment Variables
+
+The following environment variables can be used to configure the application:
+
+* `SEATBELT_TEMP_DIR` - Specifies a custom directory for temporary files. If not set, the system default temporary directory is used. (Defined as `EnvTempDir` in `pkg/seatbelt/constants.go`)
+
+Environment variables can be set in two ways:
+1. Via the system environment before running the application
+2. Via the `environment` section in the config.yaml file (these will only be applied if the variable is not already set in the system environment)
+
+Example in `config.yaml`:
+```yaml
+environment:
+  SEATBELT_TEMP_DIR: "tmp/"
+```
 
 ## Notes for LLMs
 

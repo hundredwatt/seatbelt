@@ -24,7 +24,9 @@ func NewClickHouseTarget(conn *sql.DB) *ClickHouseTarget {
 
 // Scan retrieves rows from ClickHouse and computes hashes for comparison
 func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
-	osfile, err := os.CreateTemp("", fmt.Sprintf("seatbelt-clickhouse-scan-%s-*.csv", table.TargetName()))
+	// Get temp directory from environment variable or use default
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-clickhouse-scan-%s-*.csv", table.TargetName()))
 	if err != nil {
 		return nil, err
 	}

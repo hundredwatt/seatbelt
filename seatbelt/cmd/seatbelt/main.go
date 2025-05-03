@@ -34,6 +34,7 @@ type AppConfig struct {
 	PrimaryKeyName         string                   `yaml:"primary_key_name"`
 	Columns                []seatbelt.ColumnMapping `yaml:"columns"`
 	ShadowPath             string                   `yaml:"seatbelt_data_path"` // Optional
+	Environment            map[string]string        `yaml:"environment"`        // Environment variables
 }
 
 var (
@@ -339,6 +340,19 @@ func loadConfig(path string) (*AppConfig, error) {
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config YAML: %w", err)
+	}
+
+	// Apply environment variables from config
+	if config.Environment != nil {
+		for key, value := range config.Environment {
+			currentValue := os.Getenv(key)
+			if currentValue == "" {
+				fmt.Printf("[CONFIG] Setting environment variable %s=%s\n", key, value)
+				os.Setenv(key, value)
+			} else {
+				fmt.Printf("[CONFIG] Not overriding existing environment variable %s (value: %s)\n", key, currentValue)
+			}
+		}
 	}
 
 	// Basic validation

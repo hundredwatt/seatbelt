@@ -40,7 +40,10 @@ columns:
 # Note: Primary key column ('id' in this case) is typically handled implicitly
 # by the row mapper or core logic, but ensure it exists in both tables.
 
-# --- Shadow Table Path (Optional) ---
-# Path to the DuckDB file for the shadow table.
-# If empty or omitted, an in-memory database will be used.
+# --- Seatbelt Data Path (Optional) ---
 seatbelt_data_path: "tmp/seatbelt-examples-config.db" 
+
+# --- Environment Variables ---
+# These are set when the application starts
+environment:
+  SEATBELT_TEMP_DIR: "tmp/" 

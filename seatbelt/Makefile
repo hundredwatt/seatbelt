@@ -1,5 +1,4 @@
-.PHONY: build build-intel install copy-to-mini clean
-
+# We don't really need this, as we can use `go run cmd/seatbelt/main.go` to run the program for development.
 build: ensure-build-dir
 	go build -o build/seatbelt ./cmd/seatbelt
 
@@ -7,7 +6,7 @@ build-intel: ensure-build-dir
 	GOOS=darwin GOARCH=amd64 go build -o build/seatbelt-intel ./cmd/seatbelt
 
 install:
-	go install -o build/seatbelt ./cmd/seatbelt
+	go install ./cmd/seatbelt
 
 copy-to-mini: build-intel
 	scp build/seatbelt-intel macmini.lan:~/seatbelt
@@ -18,5 +17,7 @@ ensure-build-dir:
 
 clean:
 	rm -rf build
+	rm -rf tmp
+	mkdir -p tmp
 
 all: clean install copy-to-mini
