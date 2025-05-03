@@ -93,6 +93,9 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 	}
 	file := seatbelt.NewDataFile(osfile)
 
+	// Write header
+	file.WriteLine("pk,source_hash,target_hash")
+
 	source_column_names := make([]string, len(table.SourceColumns()))
 	for i, column := range table.SourceColumns() {
 		source_column_names[i] = column.Name + "::text"

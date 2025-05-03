@@ -2,9 +2,11 @@ package seatbelt
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -58,13 +60,17 @@ func defaultFetchData(ctx context.Context, cfg *Config, cancel context.CancelFun
 	sg.Add(1)
 	go func() {
 		defer sg.Done()
+		targetScanStart := time.Now()
 		target_scan, target_scan_err = cfg.Target.Scan(ctx, cfg.Table)
+		log.Printf("Target scan completed in %v", time.Since(targetScanStart))
 	}()
 
 	sg.Add(1)
 	go func() {
 		defer sg.Done()
+		sourceScanStart := time.Now()
 		source_scan, source_scan_err = cfg.Source.Scan(ctx, cfg.Table)
+		log.Printf("Source scan completed in %v", time.Since(sourceScanStart))
 	}()
 
 	done := make(chan struct{})
@@ -89,7 +95,9 @@ func defaultFetchData(ctx context.Context, cfg *Config, cancel context.CancelFun
 		return nil, source_scan_err
 	}
 
+	consumeStart := time.Now()
 	source_changes, err := consumer.ConsumeToCompletion()
+	log.Printf("Consumer ConsumeToCompletion completed in %v", time.Since(consumeStart))
 	if err != nil {
 		return nil, err
 	}
@@ -116,20 +124,26 @@ func initialLoad(ctx context.Context, cfg *Config, cancel context.CancelFunc) (*
 	sg.Add(1)
 	go func() {
 		defer sg.Done()
+		targetScanStart := time.Now()
 		target_scan, target_scan_err = cfg.Target.Scan(ctx, cfg.Table)
+		log.Printf("Target scan completed in %v", time.Since(targetScanStart))
 	}()
 
 	sg.Add(1)
 	go func() {
 		defer sg.Done()
+		sourceExtractScanStart := time.Now()
 		source_extract_scan, source_extract_scan_err = cfg.Source.ExtractScan(ctx, cfg.Table)
+		log.Printf("Source extract scan completed in %v", time.Since(sourceExtractScanStart))
 	}()
 
 	if cfg.TestingSourceScan {
 		sg.Add(1)
 		go func() {
 			defer sg.Done()
+			sourceScanStart := time.Now()
 			source_scan, source_scan_err = cfg.Source.Scan(ctx, cfg.Table)
+			log.Printf("Source scan completed in %v", time.Since(sourceScanStart))
 		}()
 	}
 

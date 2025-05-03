@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log" // Added for logging errors
+	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2" // Import the v2 DuckDB driver
 )
@@ -79,7 +80,45 @@ func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
 }
 
 // createDataViews creates temporary views for source, target, and incremental scans
-func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet) error {
+func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, initialLoad bool) error {
+	// For initial load, we only create source_extract and target views
+	if initialLoad {
+		if data_files.SourceExtractScan == nil || data_files.TargetScan == nil {
+			return fmt.Errorf("source extract scan and target scan are required for initial load")
+		}
+
+		createSourceExtractViewQuery := fmt.Sprintf(`
+			CREATE TEMP VIEW source_extract AS 
+			SELECT 
+				CAST(pk AS BIGINT) AS pk,
+				CAST(source_hash AS BIGINT) AS source_signature,
+				CAST(target_hash AS UBIGINT) AS target_signature
+			FROM '%s';
+		`, data_files.SourceExtractScan.File.Name())
+
+		createTargetViewQuery := fmt.Sprintf(`
+			CREATE TEMP VIEW target AS 
+			SELECT 
+				CAST(pk AS BIGINT) AS pk,
+				CAST(target_hash AS UBIGINT) AS target_signature
+			FROM '%s';
+		`, data_files.TargetScan.File.Name())
+
+		for _, query := range []string{createSourceExtractViewQuery, createTargetViewQuery} {
+			_, err := db.ExecContext(ctx, query)
+			if err != nil {
+				log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
+				return fmt.Errorf("failed to create view: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// Regular incremental update - create all three views
+	if data_files.SourceScan == nil || data_files.TargetScan == nil || data_files.SourceChanges == nil {
+		return fmt.Errorf("source scan, target scan, and source changes are required for incremental update")
+	}
+
 	// Create VIEWs for the source, target, and incremental scans
 	createSourceViewQuery := fmt.Sprintf(`
 		CREATE TEMP VIEW source AS 
@@ -116,53 +155,82 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet) e
 }
 
 // getUpsertQuery returns the main UPSERT query used to update the shadow table
-func getUpsertQuery() string {
+func getUpsertQuery(initialLoad bool) string {
+	if initialLoad {
+		// For initial load, use source_extract in place of source and incremental
+		return `
+		INSERT INTO shadow
+		SELECT
+			COALESCE(source_extract.pk, target.pk) AS pk,
+			source_extract.source_signature AS source_signature,
+			target.target_signature AS target_signature,
+			source_extract.source_signature AS incremental_source_signature,
+			source_extract.target_signature AS incremental_target_signature,
+			-- Initial load always treats records as inserts
+			3 AS latest_source_operation, -- OpInsert
+			CASE WHEN target.target_signature IS NULL THEN 1 ELSE 3 END AS latest_target_operation, -- OpDoesNotExist or OpInsert
+			FALSE AS validation_error
+		FROM source_extract
+		FULL OUTER JOIN target ON source_extract.pk = target.pk
+		ORDER BY pk
+		ON CONFLICT (pk) DO UPDATE SET
+			source_signature = excluded.source_signature,
+			target_signature = excluded.target_signature,
+			incremental_source_signature = excluded.incremental_source_signature,
+			incremental_target_signature = excluded.incremental_target_signature,
+			source_operation = excluded.source_operation,
+			target_operation = excluded.target_operation,
+			validation_error = excluded.validation_error;
+		`
+	}
+
+	// Default upsert query for incremental updates
 	return `
-        INSERT INTO shadow
-        SELECT
-            COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
-            source.source_signature AS source_signature,
-            target.target_signature AS target_signature,
-            COALESCE(incremental.source_signature, shadow.incremental_source_signature) AS incremental_source_signature,
-            COALESCE(incremental.target_signature, shadow.incremental_target_signature) AS incremental_target_signature,
-            -- Use specific signature type function, assuming INT here
-            determine_source_operation_int(
-                source.source_signature,
-                shadow.source_signature
-            ) AS latest_source_operation,
-            determine_source_operation_uint(
-                target.target_signature,
-                shadow.target_signature
-            ) AS latest_target_operation,
-            check_for_validation_error_with_row_integrity(
-                latest_source_operation,
-                shadow.source_operation,
-                latest_target_operation,
-                shadow.target_operation,
-                COALESCE(shadow.validation_error, FALSE), -- Provide default for new rows
-                 -- Use specific signature type function, assuming INT here
-                verify_row_integrity_i_u(
-                    incremental.source_signature,
-                    incremental.target_signature,
-                    source.source_signature,
-                    target.target_signature
-                )
-            ) AS validation_error
-        FROM source
-        FULL OUTER JOIN shadow ON source.pk = shadow.pk
-        FULL OUTER JOIN target ON COALESCE(source.pk, shadow.pk) = target.pk
-        FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target.pk) = incremental.pk
-        -- WHERE clause for partitioning/range can be added here if needed
-        ORDER BY pk
-        ON CONFLICT (pk) DO UPDATE SET
-            source_signature = excluded.source_signature,
-            target_signature = excluded.target_signature,
-            incremental_source_signature = excluded.incremental_source_signature,
-            incremental_target_signature = excluded.incremental_target_signature,
-            source_operation = excluded.source_operation,
-            target_operation = excluded.target_operation,
-            validation_error = excluded.validation_error;
-    `
+		INSERT INTO shadow
+		SELECT
+			COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
+			source.source_signature AS source_signature,
+			target.target_signature AS target_signature,
+			COALESCE(incremental.source_signature, shadow.incremental_source_signature) AS incremental_source_signature,
+			COALESCE(incremental.target_signature, shadow.incremental_target_signature) AS incremental_target_signature,
+			-- Use specific signature type function, assuming INT here
+			determine_source_operation_int(
+				source.source_signature,
+				shadow.source_signature
+			) AS latest_source_operation,
+			determine_source_operation_uint(
+				target.target_signature,
+				shadow.target_signature
+			) AS latest_target_operation,
+			check_for_validation_error_with_row_integrity(
+				latest_source_operation,
+				shadow.source_operation,
+				latest_target_operation,
+				shadow.target_operation,
+				COALESCE(shadow.validation_error, FALSE), -- Provide default for new rows
+				 -- Use specific signature type function, assuming INT here
+				verify_row_integrity_i_u(
+					incremental.source_signature,
+					incremental.target_signature,
+					source.source_signature,
+					target.target_signature
+				)
+			) AS validation_error
+		FROM source
+		FULL OUTER JOIN shadow ON source.pk = shadow.pk
+		FULL OUTER JOIN target ON COALESCE(source.pk, shadow.pk) = target.pk
+		FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target.pk) = incremental.pk
+		-- WHERE clause for partitioning/range can be added here if needed
+		ORDER BY pk
+		ON CONFLICT (pk) DO UPDATE SET
+			source_signature = excluded.source_signature,
+			target_signature = excluded.target_signature,
+			incremental_source_signature = excluded.incremental_source_signature,
+			incremental_target_signature = excluded.incremental_target_signature,
+			source_operation = excluded.source_operation,
+			target_operation = excluded.target_operation,
+			validation_error = excluded.validation_error;
+	`
 }
 
 // getValidationStatusCaseStmt returns the CASE statement for calculating validation status
@@ -236,13 +304,13 @@ func ExplainAnalyzeUpdateShadow(ctx context.Context, cfg *Config, data_files *Da
 	defer db.Close()
 
 	// Create views for data files
-	err = createDataViews(ctx, db, data_files)
+	err = createDataViews(ctx, db, data_files, cfg.InitialLoad)
 	if err != nil {
 		return "", fmt.Errorf("failed to create data views: %w", err)
 	}
 
 	// Get the upsert query and prepend EXPLAIN ANALYZE
-	upsertQuery := getUpsertQuery()
+	upsertQuery := getUpsertQuery(cfg.InitialLoad)
 	explainQuery := fmt.Sprintf("EXPLAIN ANALYZE %s", upsertQuery)
 
 	// Run the EXPLAIN ANALYZE query
@@ -280,14 +348,16 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	defer db.Close()
 
 	// Create views for data files
-	err = createDataViews(ctx, db, data_files)
+	err = createDataViews(ctx, db, data_files, cfg.InitialLoad)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data views: %w", err)
 	}
 
 	// Get and execute the upsert query
-	upsertQuery := getUpsertQuery()
+	upsertQuery := getUpsertQuery(cfg.InitialLoad)
+	upsertStart := time.Now()
 	_, err = db.ExecContext(ctx, upsertQuery)
+	log.Printf("Upsert query completed in %v", time.Since(upsertStart))
 	if err != nil {
 		log.Printf("Error executing UPSERT query: %v\nQuery:\n%s", err, upsertQuery)
 		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
@@ -302,7 +372,9 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
         WHERE (%s) = %[2]d -- StatusGone
     `, validationStatusLogic, StatusGone)
 
+	deleteStart := time.Now()
 	_, err = db.ExecContext(ctx, deleteQuery)
+	log.Printf("Delete query completed in %v", time.Since(deleteStart))
 	if err != nil {
 		log.Printf("Error deleting GONE rows: %v\nQuery:\n%s", err, deleteQuery)
 		return nil, fmt.Errorf("failed to delete gone rows: %w", err)
@@ -311,6 +383,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	// Calculate metrics
 	metricsQuery := getMetricsQuery(validationStatusLogic)
 
+	metricsStart := time.Now()
 	metrics := &ValidationMetrics{}
 	row := db.QueryRowContext(ctx, metricsQuery)
 	err = row.Scan(
@@ -321,6 +394,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 		&metrics.PendingCount,
 		&metrics.ValidCount,
 	)
+	log.Printf("Metrics query completed in %v", time.Since(metricsStart))
 	if err != nil {
 		log.Printf("Error scanning metrics: %v\nQuery:\n%s", err, metricsQuery)
 		return nil, fmt.Errorf("failed to scan metrics: %w", err)

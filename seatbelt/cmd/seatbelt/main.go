@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"seatbelt/pkg/clickhouse"
 	"seatbelt/pkg/postgres"
@@ -42,6 +43,7 @@ var (
 	targetScanFile    string
 	sourceChangesFile string
 	explainAnalyze    bool
+	initialLoad       bool
 )
 
 var rootCmd = &cobra.Command{
@@ -75,11 +77,11 @@ var runCmd = &cobra.Command{
 		defer targetCleanup()
 
 		seatbeltCfg := &seatbelt.Config{
-			Table:      table,
-			Source:     source,
-			Target:     target,
-			ShadowPath: cfg.ShadowPath, // Pass shadow path from AppConfig
-			// InitialLoad might need to be configurable later
+			Table:       table,
+			Source:      source,
+			Target:      target,
+			ShadowPath:  cfg.ShadowPath, // Pass shadow path from AppConfig
+			InitialLoad: initialLoad,    // Set initial load flag from command line
 		}
 
 		// 2. Fetch Data
@@ -89,9 +91,11 @@ var runCmd = &cobra.Command{
 			log.Fatalf("Error fetching data: %v", err)
 		}
 		fmt.Println("Data fetched successfully.")
-		fmt.Printf("  Source Scan: %s (%d rows)\n", dataFiles.SourceScan.Name(), dataFiles.SourceScan.RowCount())
+		if !initialLoad {
+			fmt.Printf("  Source Scan: %s (%d rows)\n", dataFiles.SourceScan.Name(), dataFiles.SourceScan.RowCount())
+		}
 		fmt.Printf("  Target Scan: %s (%d rows)\n", dataFiles.TargetScan.Name(), dataFiles.TargetScan.RowCount())
-		if dataFiles.SourceChanges != nil {
+		if !initialLoad && dataFiles.SourceChanges != nil {
 			fmt.Printf("  Source Changes: %s (%d rows)\n", dataFiles.SourceChanges.Name(), dataFiles.SourceChanges.RowCount())
 		}
 		if dataFiles.SourceExtractScan != nil {
@@ -199,6 +203,132 @@ var shadowCmd = &cobra.Command{
 	},
 }
 
+var benchmarkCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Benchmark individual fetch components",
+	Long:  `Run and time individual components from the data fetch phase, such as source scan, source extract scan, or target scan.`,
+}
+
+var benchSourceScanCmd = &cobra.Command{
+	Use:   "source-scan",
+	Short: "Benchmark only the source scan operation",
+	Long:  `Run and time only the source scan operation, printing timing information and the location of the generated file.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg, err := loadConfig(configFile)
+		if err != nil {
+			log.Fatalf("Error loading config file '%s': %v", configFile, err)
+		}
+
+		ctx := context.Background()
+
+		// Create only the necessary components
+		table, err := createTable(cfg)
+		if err != nil {
+			log.Fatalf("Error creating table component: %v", err)
+		}
+
+		source, sourceCleanup, err := createSource(ctx, cfg)
+		if err != nil {
+			log.Fatalf("Error creating source component: %v", err)
+		}
+		defer sourceCleanup()
+
+		// Run only source scan
+		fmt.Println("Running source scan benchmark...")
+		startTime := time.Now()
+		sourceScan, err := source.Scan(ctx, table)
+		duration := time.Since(startTime)
+		if err != nil {
+			log.Fatalf("Error during source scan: %v", err)
+		}
+
+		// Print results
+		fmt.Printf("Source scan completed in %v\n", duration)
+		fmt.Printf("Source scan result file: %s\n", sourceScan.Name())
+		fmt.Printf("Source scan row count: %d\n", sourceScan.RowCount())
+	},
+}
+
+var benchSourceExtractScanCmd = &cobra.Command{
+	Use:   "source-extract-scan",
+	Short: "Benchmark only the source extract scan operation",
+	Long:  `Run and time only the source extract scan operation, printing timing information and the location of the generated file.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg, err := loadConfig(configFile)
+		if err != nil {
+			log.Fatalf("Error loading config file '%s': %v", configFile, err)
+		}
+
+		ctx := context.Background()
+
+		// Create only the necessary components
+		table, err := createTable(cfg)
+		if err != nil {
+			log.Fatalf("Error creating table component: %v", err)
+		}
+
+		source, sourceCleanup, err := createSource(ctx, cfg)
+		if err != nil {
+			log.Fatalf("Error creating source component: %v", err)
+		}
+		defer sourceCleanup()
+
+		// Run only source extract scan
+		fmt.Println("Running source extract scan benchmark...")
+		startTime := time.Now()
+		sourceExtractScan, err := source.ExtractScan(ctx, table)
+		duration := time.Since(startTime)
+		if err != nil {
+			log.Fatalf("Error during source extract scan: %v", err)
+		}
+
+		// Print results
+		fmt.Printf("Source extract scan completed in %v\n", duration)
+		fmt.Printf("Source extract scan result file: %s\n", sourceExtractScan.Name())
+		fmt.Printf("Source extract scan row count: %d\n", sourceExtractScan.RowCount())
+	},
+}
+
+var benchTargetScanCmd = &cobra.Command{
+	Use:   "target-scan",
+	Short: "Benchmark only the target scan operation",
+	Long:  `Run and time only the target scan operation, printing timing information and the location of the generated file.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg, err := loadConfig(configFile)
+		if err != nil {
+			log.Fatalf("Error loading config file '%s': %v", configFile, err)
+		}
+
+		ctx := context.Background()
+
+		// Create only the necessary components
+		table, err := createTable(cfg)
+		if err != nil {
+			log.Fatalf("Error creating table component: %v", err)
+		}
+
+		target, targetCleanup, err := createTarget(ctx, cfg)
+		if err != nil {
+			log.Fatalf("Error creating target component: %v", err)
+		}
+		defer targetCleanup()
+
+		// Run only target scan
+		fmt.Println("Running target scan benchmark...")
+		startTime := time.Now()
+		targetScan, err := target.Scan(ctx, table)
+		duration := time.Since(startTime)
+		if err != nil {
+			log.Fatalf("Error during target scan: %v", err)
+		}
+
+		// Print results
+		fmt.Printf("Target scan completed in %v\n", duration)
+		fmt.Printf("Target scan result file: %s\n", targetScan.Name())
+		fmt.Printf("Target scan row count: %d\n", targetScan.RowCount())
+	},
+}
+
 func loadConfig(path string) (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -239,6 +369,30 @@ func loadConfig(path string) (*AppConfig, error) {
 // createComponents initializes the Source, Target, Table, and RowMapper based on config
 // It now returns the components and cleanup functions for source and target connections.
 func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, seatbelt.Target, seatbelt.Table, func(), func(), error) {
+	// Create row mapper and table
+	table, err := createTable(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// Create source
+	source, sourceCleanup, err := createSource(ctx, cfg)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// Create target
+	target, targetCleanup, err := createTarget(ctx, cfg)
+	if err != nil {
+		sourceCleanup() // Clean up source if target creation fails
+		return nil, nil, nil, nil, nil, err
+	}
+
+	return source, target, table, sourceCleanup, targetCleanup, nil
+}
+
+// createTable creates just the table component based on config
+func createTable(cfg *AppConfig) (seatbelt.Table, error) {
 	var rowMapper seatbelt.RowMapperAndHasher
 	switch cfg.RowMapperName {
 	case "peer_db":
@@ -248,7 +402,7 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 			&row_mappers.PeerDBRowMapper{},
 		)
 	default:
-		return nil, nil, nil, nil, nil, fmt.Errorf("unknown row_mapper_name: %s", cfg.RowMapperName)
+		return nil, fmt.Errorf("unknown row_mapper_name: %s", cfg.RowMapperName)
 	}
 
 	tableDef := seatbelt.TableDefinition{
@@ -263,35 +417,43 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 		RowMapperAndHasher: rowMapper,
 	}
 
+	return table, nil
+}
+
+// createSource creates just the source component based on config
+func createSource(ctx context.Context, cfg *AppConfig) (seatbelt.Source, func(), error) {
 	// --- Create Source (PostgreSQL) ---
 	pgPool, err := pgxpool.New(ctx, cfg.SourceConnectionString)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("unable to create postgres connection pool: %w", err)
+		return nil, nil, fmt.Errorf("unable to create postgres connection pool: %w", err)
 	}
 	if err := pgPool.Ping(ctx); err != nil {
 		pgPool.Close() // Close pool if ping fails
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to ping postgres database: %w", err)
+		return nil, nil, fmt.Errorf("failed to ping postgres database: %w", err)
 	}
 	source := postgres.NewPostgresSource(pgPool)
 	sourceCleanup := func() { pgPool.Close() }
 	log.Println("PostgreSQL source connection established.")
 
+	return source, sourceCleanup, nil
+}
+
+// createTarget creates just the target component based on config
+func createTarget(ctx context.Context, cfg *AppConfig) (seatbelt.Target, func(), error) {
 	// --- Create Target (ClickHouse) ---
 	chDB, err := sql.Open("clickhouse", cfg.TargetConnectionString)
 	if err != nil {
-		sourceCleanup() // Cleanup source if target fails
-		return nil, nil, nil, nil, nil, fmt.Errorf("unable to open clickhouse connection: %w", err)
+		return nil, nil, fmt.Errorf("unable to open clickhouse connection: %w", err)
 	}
 	if err := chDB.PingContext(ctx); err != nil {
 		chDB.Close()
-		sourceCleanup()
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to ping clickhouse database: %w", err)
+		return nil, nil, fmt.Errorf("failed to ping clickhouse database: %w", err)
 	}
 	target := clickhouse.NewClickHouseTarget(chDB)
 	targetCleanup := func() { chDB.Close() }
 	log.Println("ClickHouse target connection established.")
 
-	return source, target, table, sourceCleanup, targetCleanup, nil
+	return target, targetCleanup, nil
 }
 
 // printMetrics formats and prints the validation metrics
@@ -312,6 +474,7 @@ func init() {
 
 	// Flags for 'run' command (also used by 'fetch')
 	runCmd.Flags().BoolVar(&fetchDataOnly, "fetch-only", false, "Only fetch data, do not update the shadow table")
+	runCmd.Flags().BoolVar(&initialLoad, "initial-load", false, "Perform initial load instead of incremental update")
 	rootCmd.AddCommand(runCmd)
 
 	// Flags for 'fetch' command (inherits --config)
@@ -328,6 +491,12 @@ func init() {
 	shadowCmd.MarkFlagRequired("target-scan")
 	shadowCmd.MarkFlagRequired("source-changes")
 	rootCmd.AddCommand(shadowCmd)
+
+	// Register benchmark commands
+	benchmarkCmd.AddCommand(benchSourceScanCmd)
+	benchmarkCmd.AddCommand(benchSourceExtractScanCmd)
+	benchmarkCmd.AddCommand(benchTargetScanCmd)
+	rootCmd.AddCommand(benchmarkCmd)
 }
 
 func main() {
