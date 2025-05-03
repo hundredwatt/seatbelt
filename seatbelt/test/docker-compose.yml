@@ -11,7 +11,7 @@ services:
       POSTGRES_DB: seatbelt
     volumes:
       - ./postgres-init:/docker-entrypoint-initdb.d
-      - ./.postgres_data:/var/lib/postgresql/data
+      - ../tmp/postgres_data:/var/lib/postgresql/data
       - ./postgres-config.conf:/etc/postgresql/postgresql.conf
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
@@ -33,7 +33,7 @@ services:
         hard: 262144
     volumes:
       - ./clickhouse-init:/docker-entrypoint-initdb.d
-      - ./.clickhouse_data:/var/lib/clickhouse
+      - ../tmp/clickhouse_data:/var/lib/clickhouse
       - ./clickhouse-listen.xml:/etc/clickhouse-server/config.d/listen.xml
     environment:
       CLICKHOUSE_DB: peerdb

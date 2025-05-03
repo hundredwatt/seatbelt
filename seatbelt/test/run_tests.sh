@@ -16,9 +16,9 @@ docker-compose down
 
 # Remove PostgreSQL and ClickHouse data to ensure clean slate
 echo "Removing existing PostgreSQL data..."
-rm -rf .postgres_data
+rm -rf ../tmp/postgres_data
 echo "Removing existing ClickHouse data..."
-rm -rf .clickhouse_data # Add removal for ClickHouse data
+rm -rf ../tmp/clickhouse_data # Add removal for ClickHouse data
 
 # Ensure docker-compose is running
 echo "Starting Docker containers..."

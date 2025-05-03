@@ -1,3 +1,26 @@
+## All
+all: clean install copy-to-mini
+
+## Test/Development Resources
+up:
+	docker-compose -f test/docker-compose.yml up -d
+
+down:
+	docker-compose -f test/docker-compose.yml down
+
+logs:
+	docker-compose -f test/docker-compose.yml logs -f
+
+psql:
+	docker exec -it seatbelt-postgres psql -U postgres -d seatbelt
+
+clickhouse-client:
+	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb --password pass
+
+test:
+	go test -v ./...
+
+## Build/Install
 # We don't really need this, as we can use `go run cmd/seatbelt/main.go` to run the program for development.
 build: ensure-build-dir
 	go build -o build/seatbelt ./cmd/seatbelt
@@ -15,9 +38,9 @@ copy-to-mini: build-intel
 ensure-build-dir:
 	mkdir -p build
 
+## Clean
 clean:
+	docker-compose -f test/docker-compose.yml down
 	rm -rf build
 	rm -rf tmp
 	mkdir -p tmp
-
-all: clean install copy-to-mini

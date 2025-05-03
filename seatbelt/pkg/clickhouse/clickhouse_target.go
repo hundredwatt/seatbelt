@@ -33,10 +33,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	file := seatbelt.NewDataFile(osfile)
 
 	// Write header
-	header := fmt.Sprintf("%s,%s\n", "pk", "target_hash")
-	if _, err := file.File.WriteString(header); err != nil {
-		return nil, fmt.Errorf("failed to write header to file: %w", err)
-	}
+	file.WriteHeaderLine("pk,target_hash")
 
 	// Build column list for SELECT
 	var columnNames []string
