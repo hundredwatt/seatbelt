@@ -490,12 +490,12 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 // RowMapper/Table creation happens in createComponents.
 func createTable(cfg *AppConfig) (seatbelt.TableDefinition, error) {
 	tableDef := seatbelt.TableDefinition{
-		SourceDatabase: seatbelt.POSTGRES,
-		TargetDatabase: seatbelt.CLICKHOUSE,
-		TableName:      cfg.TableName,
-		TargetTableName:    cfg.TargetTableName,
-		PrimaryKeyName:     cfg.PrimaryKeyName,
-		Columns:            cfg.Columns,
+		SourceDatabase:  seatbelt.POSTGRES,
+		TargetDatabase:  seatbelt.CLICKHOUSE,
+		TableName:       cfg.TableName,
+		TargetTableName: cfg.TargetTableName,
+		PrimaryKeyName:  cfg.PrimaryKeyName,
+		Columns:         cfg.Columns,
 	}
 	// Basic validation (can add more specific TableDefinition validation if needed)
 	if tableDef.TableName == "" || tableDef.PrimaryKeyName == "" || len(tableDef.Columns) == 0 {

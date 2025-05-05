@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
 	"seatbelt/pkg/seatbelt"
 
@@ -44,12 +43,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	}
 
 	// Build the concatenation expression for hashing
-	// ClickHouse uses concat() function with explicit casting to String
-	var concatParts []string
-	for _, col := range table.TargetColumns() {
-		concatParts = append(concatParts, fmt.Sprintf("CAST(%s AS String)", col.Name))
-	}
-	concatExpr := fmt.Sprintf("concat(%s)", strings.Join(concatParts, ", "))
+	concatExpr := BuildTargetTextExpressionForHashing(table)
 
 	// Construct query to get primary key values and compute hashes
 	query := fmt.Sprintf(`
@@ -58,7 +52,6 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 			xxh3(%s) AS target_hash
 		FROM %s
 	`, table.PrimaryKey(), concatExpr, table.TargetName())
-
 
 	// Execute the query
 	rows, err := t.conn.QueryContext(ctx, query)

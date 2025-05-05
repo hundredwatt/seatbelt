@@ -79,10 +79,10 @@ func TestPeerDB_PG_To_CH(t *testing.T) {
 		InitialLoad:       true,
 		TestingSourceScan: true,
 	})
+	assert.NoError(t, err)
 	defer os.Remove(result.SourceScan.File.Name())
 	defer os.Remove(result.SourceExtractScan.File.Name())
 	defer os.Remove(result.TargetScan.File.Name())
-	assert.NoError(t, err)
 
 	assert.Equal(t, int64(25), result.SourceScan.RowCount())
 	assert.Equal(t, int64(25), result.SourceExtractScan.RowCount())

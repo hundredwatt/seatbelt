@@ -43,14 +43,6 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		safeFullTableName = pgx.Identifier{table.Name()}.Sanitize()
 	}
 
-	// Build the concatenation part of the query for hashing
-	var coalesceParts []string
-	for _, col := range table.SourceColumns() {
-		safeColName := pgx.Identifier{col.Name}.Sanitize()
-		coalesceParts = append(coalesceParts, fmt.Sprintf("COALESCE(%s::text, '👻')", safeColName))
-	}
-	concatenationExpression := strings.Join(coalesceParts, " || ")
-
 	// Build a SQL query to export directly to CSV using COPY
 	query := fmt.Sprintf(`
 		COPY (
@@ -61,7 +53,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		) TO STDOUT WITH (FORMAT csv, HEADER)
 	`,
 		table.PrimaryKey(),
-		concatenationExpression,
+		BuildSourceTextExpressionForHashing(table),
 		SEED, // Using the constant from default_source_hasher.go
 		safeFullTableName)
 
