@@ -76,9 +76,9 @@ func init() {
 var table_definition = &seatbelt.TableDefinition{
 	TableName: "test",
 	Columns: []seatbelt.ColumnMapping{
-		{Name: "id", SourceType: seatbelt.ColumnTypeInt, TargetType: seatbelt.ColumnTypeInt},
-		{Name: "name", SourceType: seatbelt.ColumnTypeText, TargetType: seatbelt.ColumnTypeText},
-		{Name: "score", SourceType: seatbelt.ColumnTypeInt, TargetType: seatbelt.ColumnTypeFloat},
+		{Name: "id", SourceType: "integer", TargetType: "integer"},
+		{Name: "name", SourceType: "text", TargetType: "text"},
+		{Name: "score", SourceType: "integer", TargetType: "float"},
 	},
 }
 

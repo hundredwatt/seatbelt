@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const postgresDatabaseName = "postgres"
+
 type PostgresSource struct {
 	conn *pgxpool.Pool
 }

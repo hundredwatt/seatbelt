@@ -1,30 +1,16 @@
 package seatbelt
 
-type ColumnType string
-
-const (
-	ColumnTypeInt       ColumnType = "int"
-	ColumnTypeFloat     ColumnType = "float"
-	ColumnTypeText      ColumnType = "text"
-	ColumnTypeNull      ColumnType = ""
-	ColumnTypeSmallInt  ColumnType = "smallint"
-	ColumnTypeBigInt    ColumnType = "bigint"
-	ColumnTypeDouble    ColumnType = "double"
-	ColumnTypeBoolean   ColumnType = "boolean"
-	ColumnTypeDate      ColumnType = "date"
-	ColumnTypeTime      ColumnType = "time"
-	ColumnTypeTimestamp ColumnType = "timestamp"
-)
+// Assuming typesystem might be needed later, add import
 
 type Column struct {
 	Name string
-	Type ColumnType
+	Type string // Changed from ColumnType
 }
 
 type ColumnMapping struct {
 	Name       string
-	SourceType ColumnType `yaml:"source_type"`
-	TargetType ColumnType `yaml:"target_type"`
+	SourceType string `yaml:"source_type"` // Changed from ColumnType
+	TargetType string `yaml:"target_type"` // Changed from ColumnType
 }
 
 type TableDefinition struct {
@@ -54,23 +40,25 @@ func (t *TableDefinition) ColumnMapping() []ColumnMapping {
 }
 
 func (t *TableDefinition) SourceColumns() []Column {
-	columns := make([]Column, len(t.Columns))
-	for i, column := range t.Columns {
-		if column.SourceType == ColumnTypeNull {
+	columns := make([]Column, 0, len(t.Columns)) // Initialize with capacity
+	for _, column := range t.Columns {
+		// Check if SourceType is empty instead of ColumnTypeNull
+		if column.SourceType == "" {
 			continue
 		}
-		columns[i] = Column{Name: column.Name, Type: column.SourceType}
+		columns = append(columns, Column{Name: column.Name, Type: column.SourceType})
 	}
 	return columns
 }
 
 func (t *TableDefinition) TargetColumns() []Column {
-	columns := make([]Column, len(t.Columns))
-	for i, column := range t.Columns {
-		if column.TargetType == ColumnTypeNull {
+	columns := make([]Column, 0, len(t.Columns)) // Initialize with capacity
+	for _, column := range t.Columns {
+		// Check if TargetType is empty instead of ColumnTypeNull
+		if column.TargetType == "" {
 			continue
 		}
-		columns[i] = Column{Name: column.Name, Type: column.TargetType}
+		columns = append(columns, Column{Name: column.Name, Type: column.TargetType})
 	}
 	return columns
 }

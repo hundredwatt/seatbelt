@@ -1,0 +1,95 @@
+database_name: clickhouse
+types:
+  - name: Int8
+    family: integer
+    aliases: []
+    documentation: "Signed 8-bit integer"
+  - name: Int16
+    family: integer
+    aliases: []
+    documentation: "Signed 16-bit integer"
+  - name: Int32
+    family: integer
+    aliases: []
+    documentation: "Signed 32-bit integer"
+  - name: Int64
+    family: integer
+    aliases: []
+    documentation: "Signed 64-bit integer"
+  - name: UInt8
+    family: integer
+    aliases: []
+    documentation: "Unsigned 8-bit integer"
+  - name: UInt16
+    family: integer
+    aliases: []
+    documentation: "Unsigned 16-bit integer"
+  - name: UInt32
+    family: integer
+    aliases: []
+    documentation: "Unsigned 32-bit integer"
+  - name: UInt64
+    family: integer
+    aliases: []
+    documentation: "Unsigned 64-bit integer"
+  - name: Float32
+    family: float
+    aliases: []
+    documentation: "IEEE 754 single-precision floating-point number"
+  - name: Float64
+    family: float
+    aliases: []
+    documentation: "IEEE 754 double-precision floating-point number"
+  - name: Decimal
+    family: decimal
+    aliases: [Decimal32, Decimal64, Decimal128, Decimal256]
+    attributes:
+      - name: precision
+        description: "Total number of digits (1-76)"
+      - name: scale
+        description: "Number of digits in the fractional part (0 to precision)"
+    documentation: "Decimal number with fixed precision"
+  - name: String
+    family: string
+    aliases: []
+    documentation: "Variable-length string"
+  - name: FixedString
+    family: string
+    aliases: []
+    attributes:
+      - name: N
+        description: "Fixed length"
+    documentation: "Fixed-length string"
+  - name: Boolean
+    family: boolean
+    aliases: []
+    documentation: "Boolean type (true/false)"
+  - name: Date
+    family: date
+    aliases: []
+    documentation: "Date (year, month, day), stored as UInt16"
+  - name: Date32
+    family: date
+    aliases: []
+    documentation: "Date (year, month, day), stored as Int32"
+  - name: DateTime
+    family: datetime
+    aliases: []
+    attributes:
+      - name: timezone # Optional
+        description: "Timezone"
+    documentation: "Timestamp (year to second), stored as UInt32"
+  - name: DateTime64
+    family: datetime
+    aliases: []
+    attributes:
+      - name: precision
+        description: "Sub-second precision (0-9)"
+      - name: timezone # Optional
+        description: "Timezone"
+    documentation: "Timestamp with sub-second precision, stored as Int64"
+  - name: UUID
+    family: uuid
+    aliases: []
+    documentation: "Universally Unique Identifier"
+  # Add more types based on https://clickhouse.com/docs/sql-reference/data-types 

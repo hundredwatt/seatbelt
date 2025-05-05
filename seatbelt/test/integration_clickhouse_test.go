@@ -25,10 +25,10 @@ var test_clickhouse_table_definition = &seatbelt.TableDefinition{
 	TableName:      testClickHouseTableName,
 	PrimaryKeyName: testClickHouseIDColumn,
 	Columns: []seatbelt.ColumnMapping{
-		{Name: "smallint_col", SourceType: seatbelt.ColumnTypeSmallInt, TargetType: seatbelt.ColumnTypeSmallInt},
-		{Name: "bigint_col", SourceType: seatbelt.ColumnTypeBigInt, TargetType: seatbelt.ColumnTypeBigInt},
-		{Name: "float_col", SourceType: seatbelt.ColumnTypeFloat, TargetType: seatbelt.ColumnTypeFloat},
-		{Name: "double_col", SourceType: seatbelt.ColumnTypeDouble, TargetType: seatbelt.ColumnTypeDouble},
+		{Name: "smallint_col", TargetType: "Int16"},
+		{Name: "bigint_col", TargetType: "Int64"},
+		{Name: "float_col", TargetType: "Float32"},
+		{Name: "double_col", TargetType: "Float64"},
 	},
 }
 

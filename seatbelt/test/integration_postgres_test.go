@@ -30,10 +30,10 @@ var table_definition = &seatbelt.TableDefinition{
 	TableName:      testTableName,
 	PrimaryKeyName: testIDColumn,
 	Columns: []seatbelt.ColumnMapping{
-		{Name: "smallint_col", SourceType: seatbelt.ColumnTypeSmallInt, TargetType: seatbelt.ColumnTypeSmallInt},
-		{Name: "bigint_col", SourceType: seatbelt.ColumnTypeBigInt, TargetType: seatbelt.ColumnTypeBigInt},
-		{Name: "float_col", SourceType: seatbelt.ColumnTypeFloat, TargetType: seatbelt.ColumnTypeFloat},
-		{Name: "double_col", SourceType: seatbelt.ColumnTypeDouble, TargetType: seatbelt.ColumnTypeDouble},
+		{Name: "smallint_col", SourceType: "smallint"},
+		{Name: "bigint_col", SourceType: "bigint"},
+		{Name: "float_col", SourceType: "real"},
+		{Name: "double_col", SourceType: "double precision"},
 	},
 }
 

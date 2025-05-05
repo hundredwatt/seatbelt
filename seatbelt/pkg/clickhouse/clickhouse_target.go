@@ -12,6 +12,8 @@ import (
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 )
 
+const clickhouseDatabaseName = "clickhouse"
+
 // ClickHouseTarget implements the seatbelt.Target interface for ClickHouse databases
 type ClickHouseTarget struct {
 	conn *sql.DB
@@ -56,6 +58,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 			xxh3(%s) AS target_hash
 		FROM %s
 	`, table.PrimaryKey(), concatExpr, table.TargetName())
+
 
 	// Execute the query
 	rows, err := t.conn.QueryContext(ctx, query)
