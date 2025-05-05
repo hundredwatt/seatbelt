@@ -27,6 +27,7 @@ const (
 )
 
 var table_definition = &seatbelt.TableDefinition{
+	SourceDatabase: seatbelt.POSTGRES,
 	TableName:      testTableName,
 	PrimaryKeyName: testIDColumn,
 	Columns: []seatbelt.ColumnMapping{

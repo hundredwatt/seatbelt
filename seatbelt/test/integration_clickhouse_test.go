@@ -22,6 +22,7 @@ const (
 )
 
 var test_clickhouse_table_definition = &seatbelt.TableDefinition{
+	TargetDatabase: seatbelt.CLICKHOUSE,
 	TableName:      testClickHouseTableName,
 	PrimaryKeyName: testClickHouseIDColumn,
 	Columns: []seatbelt.ColumnMapping{

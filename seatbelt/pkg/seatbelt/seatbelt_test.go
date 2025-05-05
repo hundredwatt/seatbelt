@@ -74,11 +74,13 @@ func init() {
 
 /* Test Data Sources */
 var table_definition = &seatbelt.TableDefinition{
-	TableName: "test",
+	SourceDatabase: seatbelt.POSTGRES,
+	TargetDatabase: seatbelt.POSTGRES,
+	TableName:      "test",
 	Columns: []seatbelt.ColumnMapping{
 		{Name: "id", SourceType: "integer", TargetType: "integer"},
 		{Name: "name", SourceType: "text", TargetType: "text"},
-		{Name: "score", SourceType: "integer", TargetType: "float"},
+		{Name: "score", SourceType: "integer", TargetType: "real"},
 	},
 }
 

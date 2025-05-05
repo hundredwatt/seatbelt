@@ -239,9 +239,7 @@ var benchSourceScanCmd = &cobra.Command{
 		if cfg.RowMapperName != "peer_db" {
 			log.Fatalf("Benchmark currently only supports 'peer_db' mapper")
 		}
-		sourceDBName := "postgres"   // TODO: Infer
-		targetDBName := "clickhouse" // TODO: Infer
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef, sourceDBName, targetDBName)
+		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{},
 			&clickhouse.ClickHouseTargetHasher{},
@@ -299,9 +297,7 @@ var benchSourceExtractScanCmd = &cobra.Command{
 		if cfg.RowMapperName != "peer_db" {
 			log.Fatalf("Benchmark currently only supports 'peer_db' mapper")
 		}
-		sourceDBName := "postgres"   // TODO: Infer
-		targetDBName := "clickhouse" // TODO: Infer
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef, sourceDBName, targetDBName)
+		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{},
 			&clickhouse.ClickHouseTargetHasher{},
@@ -359,9 +355,7 @@ var benchTargetScanCmd = &cobra.Command{
 		if cfg.RowMapperName != "peer_db" {
 			log.Fatalf("Benchmark currently only supports 'peer_db' mapper")
 		}
-		sourceDBName := "postgres"   // TODO: Infer
-		targetDBName := "clickhouse" // TODO: Infer
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef, sourceDBName, targetDBName)
+		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{},
 			&clickhouse.ClickHouseTargetHasher{},
@@ -454,7 +448,6 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 
 	// --- Create Source --- (Determine source DB name)
 	// TODO: Infer from cfg.SourceConnectionString scheme
-	sourceDBName := "postgres" // Hardcoded for now
 	source, sourceCleanup, err := createSource(ctx, cfg)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -462,7 +455,6 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 
 	// --- Create Target --- (Determine target DB name)
 	// TODO: Infer from cfg.TargetConnectionString scheme
-	targetDBName := "clickhouse" // Hardcoded for now
 	target, targetCleanup, err := createTarget(ctx, cfg)
 	if err != nil {
 		sourceCleanup() // Clean up source if target creation fails
@@ -474,7 +466,7 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 	switch cfg.RowMapperName {
 	case "peer_db":
 		// Pass the determined database names
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef, sourceDBName, targetDBName)
+		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{}, // Assuming these are still correct
 			&clickhouse.ClickHouseTargetHasher{},
@@ -498,10 +490,12 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 // RowMapper/Table creation happens in createComponents.
 func createTable(cfg *AppConfig) (seatbelt.TableDefinition, error) {
 	tableDef := seatbelt.TableDefinition{
-		TableName:       cfg.TableName,
-		TargetTableName: cfg.TargetTableName,
-		PrimaryKeyName:  cfg.PrimaryKeyName,
-		Columns:         cfg.Columns,
+		SourceDatabase: seatbelt.POSTGRES,
+		TargetDatabase: seatbelt.CLICKHOUSE,
+		TableName:      cfg.TableName,
+		TargetTableName:    cfg.TargetTableName,
+		PrimaryKeyName:     cfg.PrimaryKeyName,
+		Columns:            cfg.Columns,
 	}
 	// Basic validation (can add more specific TableDefinition validation if needed)
 	if tableDef.TableName == "" || tableDef.PrimaryKeyName == "" || len(tableDef.Columns) == 0 {

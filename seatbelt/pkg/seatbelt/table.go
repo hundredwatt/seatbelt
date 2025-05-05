@@ -1,10 +1,23 @@
 package seatbelt
 
-// Assuming typesystem might be needed later, add import
+import (
+	"seatbelt/pkg/typesystem"
+)
+
+type DatabaseName string
+
+const (
+	POSTGRES DatabaseName = "postgres"
+	CLICKHOUSE DatabaseName = "clickhouse"
+)
+
+func (d DatabaseName) String() string {
+	return string(d)
+}
 
 type Column struct {
-	Name string
-	Type string // Changed from ColumnType
+	Name       string
+	TypeInfo   *typesystem.DatabaseTypeInfo
 }
 
 type ColumnMapping struct {
@@ -14,10 +27,12 @@ type ColumnMapping struct {
 }
 
 type TableDefinition struct {
-	TableName       string
-	TargetTableName string
-	PrimaryKeyName  string
-	Columns         []ColumnMapping
+	SourceDatabase	DatabaseName
+	TargetDatabase	DatabaseName
+	TableName          string
+	TargetTableName    string
+	PrimaryKeyName     string
+	Columns            []ColumnMapping
 }
 
 func (t *TableDefinition) Name() string {
@@ -46,7 +61,10 @@ func (t *TableDefinition) SourceColumns() []Column {
 		if column.SourceType == "" {
 			continue
 		}
-		columns = append(columns, Column{Name: column.Name, Type: column.SourceType})
+		columns = append(columns, Column{
+			Name:       column.Name,
+			TypeInfo:   typesystem.TypeRegistry.GetTypeInfo(t.SourceDatabase.String(), column.SourceType),
+		})
 	}
 	return columns
 }
@@ -58,7 +76,10 @@ func (t *TableDefinition) TargetColumns() []Column {
 		if column.TargetType == "" {
 			continue
 		}
-		columns = append(columns, Column{Name: column.Name, Type: column.TargetType})
+		columns = append(columns, Column{
+			Name:       column.Name,
+			TypeInfo:   typesystem.TypeRegistry.GetTypeInfo(t.TargetDatabase.String(), column.TargetType),
+		})
 	}
 	return columns
 }
@@ -68,7 +89,6 @@ type Table interface {
 	Name() string
 	TargetName() string
 	PrimaryKey() string // TODO: Compound primary key support
-	ColumnMapping() []ColumnMapping
 	SourceColumns() []Column
 	TargetColumns() []Column
 

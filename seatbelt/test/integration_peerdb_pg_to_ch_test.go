@@ -36,9 +36,11 @@ const (
 )
 
 var table_definition = &seatbelt.TableDefinition{
-	TableName:       testTableName,
-	TargetTableName: testClickHouseTableName,
-	PrimaryKeyName:  testIDColumn,
+	SourceDatabase: seatbelt.POSTGRES,
+	TargetDatabase: seatbelt.CLICKHOUSE,
+	TableName:      testTableName,
+	TargetTableName:    testClickHouseTableName,
+	PrimaryKeyName:     testIDColumn,
 	Columns: []seatbelt.ColumnMapping{
 		{Name: "smallint_col", SourceType: "smallint", TargetType: "Int16"},
 		{Name: "bigint_col", SourceType: "bigint", TargetType: "Int64"},
@@ -52,7 +54,7 @@ var table = &seatbelt.DefaultTable{
 	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(
 		&postgres.PostgresSourceHasher{},
 		&clickhouse.ClickHouseTargetHasher{},
-		row_mappers.NewPeerDBRowMapper(*table_definition, "postgres", "clickhouse"),
+		row_mappers.NewPeerDBRowMapper(*table_definition),
 	),
 }
 

@@ -9,17 +9,13 @@ import (
 )
 
 type PeerDBRowMapper struct {
-	tableDef           seatbelt.TableDefinition // Store the table definition
-	SourceDatabaseName string                   // Name of the source database
-	TargetDatabaseName string                   // Name of the target database
+	tableDef seatbelt.TableDefinition
 }
 
 // NewPeerDBRowMapper creates a new PeerDBRowMapper with the given table definition and database names.
-func NewPeerDBRowMapper(tableDef seatbelt.TableDefinition, sourceDBName string, targetDBName string) *PeerDBRowMapper {
+func NewPeerDBRowMapper(tableDef seatbelt.TableDefinition) *PeerDBRowMapper {
 	return &PeerDBRowMapper{
-		tableDef:           tableDef,
-		SourceDatabaseName: sourceDBName,
-		TargetDatabaseName: targetDBName,
+		tableDef: tableDef,
 	}
 }
 
@@ -33,7 +29,7 @@ func (m *PeerDBRowMapper) TransformSourceToCommon(row []interface{}) (string, er
 	var commonParts []string
 	for i, col := range m.tableDef.SourceColumns() { // Iterate based on config order
 		// Pass source database name and type string
-		transformedValue := transformValue(row[i], m.SourceDatabaseName, col.Type)
+		transformedValue := transformValue(row[i], col.TypeInfo.Family)
 		commonParts = append(commonParts, transformedValue)
 	}
 	return strings.Join(commonParts, ""), nil // Consider a delimiter if needed
@@ -48,8 +44,7 @@ func (m *PeerDBRowMapper) TransformTargetToCommon(row []interface{}) (string, er
 
 	var commonParts []string
 	for i, col := range m.tableDef.TargetColumns() {
-		family := typesystem.TypeRegistry.GetTypeFamily(m.TargetDatabaseName, col.Type)
-		switch family {
+		switch col.TypeInfo.Family {
 		case typesystem.FloatFamily, typesystem.DecimalFamily:
 			commonParts = append(commonParts, fmt.Sprintf("%f", row[i]))
 		case typesystem.IntegerFamily:
@@ -63,12 +58,10 @@ func (m *PeerDBRowMapper) TransformTargetToCommon(row []interface{}) (string, er
 }
 
 // transformValue handles nil and type-specific transformations based on TypeFamily.
-func transformValue(value interface{}, databaseName string, dataType string) string {
+func transformValue(value interface{}, family typesystem.TypeFamily) string {
 	if value == nil {
 		return "0" // Use NULL representation for nil (Changed from "0")
 	}
-
-	family := typesystem.TypeRegistry.GetTypeFamily(databaseName, dataType)
 
 	// Special handling for strings that might represent floats (needed before general family switch)
 	if strVal, ok := value.(string); ok {

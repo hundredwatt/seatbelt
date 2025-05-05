@@ -132,6 +132,9 @@ func (r *registry) GetTypeInfo(databaseName, typeName string) *DatabaseTypeInfo 
 			return nil
 		}
 	}
+	if info == nil {
+		panic(fmt.Sprintf("type not found: %s.%s", databaseName, typeName))
+	}
 	return info
 }
 
