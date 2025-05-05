@@ -17,6 +17,7 @@ psql:
 clickhouse-client:
 	docker exec -it seatbelt-clickhouse clickhouse-client -d peerdb --password pass
 
+.PHONY: test
 test:
 	go test -v ./...
 
@@ -33,7 +34,7 @@ install:
 
 copy-to-mini: build-intel
 	scp build/seatbelt-intel macmini.lan:~/seatbelt
-	ssh macmini.lan "chmod +x ~/seatbelt && sudo mv ~/seatbelt /usr/local/bin/"
+	ssh macmini.lan "chmod +x ~/seatbelt && mv ~/seatbelt /usr/local/bin/"
 
 ensure-build-dir:
 	mkdir -p build
