@@ -241,8 +241,8 @@ var benchSourceScanCmd = &cobra.Command{
 		}
 		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
-			&postgres.PostgresSourceHasher{},
-			&clickhouse.ClickHouseTargetHasher{},
+			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
+			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
 			peerDbMapper,
 		)
 

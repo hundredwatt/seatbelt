@@ -20,11 +20,19 @@ func (h *MockSourceHasher) SourceHash(data string) seatbelt.RowHash {
 	return seatbelt.Hex32Hash(blake2b.Sum256([]byte(data)))
 }
 
+func (h *MockSourceHasher) SQLTextExpressionForSourceHashing() string {
+	return "'error - not implemented'"
+}
+
 type MockTargetHasher struct {
 }
 
 func (h *MockTargetHasher) TargetHash(data string) seatbelt.RowHash {
 	return seatbelt.Hex16Hash(md5.Sum([]byte(data)))
+}
+
+func (h *MockTargetHasher) SQLTextExpressionForTargetHashing() string {
+	return "'error - not implemented'"
 }
 
 type MockRowMapper struct {

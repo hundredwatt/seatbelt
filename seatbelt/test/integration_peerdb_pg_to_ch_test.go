@@ -52,8 +52,8 @@ var table_definition = &seatbelt.TableDefinition{
 var table = &seatbelt.DefaultTable{
 	TableDefinition: *table_definition,
 	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(
-		&postgres.PostgresSourceHasher{},
-		&clickhouse.ClickHouseTargetHasher{},
+		&postgres.PostgresSourceHasher{TableDefinition: table_definition},
+		&clickhouse.ClickHouseTargetHasher{TableDefinition: table_definition},
 		row_mappers.NewPeerDBRowMapper(*table_definition),
 	),
 }

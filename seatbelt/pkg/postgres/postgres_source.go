@@ -53,7 +53,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		) TO STDOUT WITH (FORMAT csv, HEADER)
 	`,
 		table.PrimaryKey(),
-		BuildSourceTextExpressionForHashing(table),
+		table.SQLTextExpressionForSourceHashing(),
 		SEED, // Using the constant from default_source_hasher.go
 		safeFullTableName)
 

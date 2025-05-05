@@ -35,7 +35,7 @@ var test_clickhouse_table_definition = &seatbelt.TableDefinition{
 
 var test_clickhouse_table = &seatbelt.DefaultTable{
 	TableDefinition:    *test_clickhouse_table_definition,
-	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&testutil.MockSourceHasher{}, &clickhouse.ClickHouseTargetHasher{}, &testutil.MockRowMapper{}),
+	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&testutil.MockSourceHasher{}, &clickhouse.ClickHouseTargetHasher{TableDefinition: test_clickhouse_table_definition}, &testutil.MockRowMapper{}),
 }
 
 func TestClickhouse_Scan(t *testing.T) {

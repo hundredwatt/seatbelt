@@ -41,10 +41,12 @@ func (h Hex16Hash) String() string {
 type SourceHasher interface {
 	FormatSource(row []interface{}) (string, error)
 	SourceHash(data string) RowHash
+	SQLTextExpressionForSourceHashing() string
 }
 
 type TargetHasher interface {
 	TargetHash(data string) RowHash
+	SQLTextExpressionForTargetHashing() string
 }
 
 type RowMapper interface {

@@ -351,6 +351,16 @@ func (h *TestingRowMapperAndHasher) TargetHash(data string) seatbelt.RowHash {
 	return seatbelt.Hex16Hash(hasher.Sum(nil)[0:16])
 }
 
+func (h *TestingRowMapperAndHasher) SQLTextExpressionForSourceHashing() string {
+	// Return a dummy SQL expression for testing purposes
+	return "CONCAT(name, '|', CAST(score AS TEXT))"
+}
+
+func (h *TestingRowMapperAndHasher) SQLTextExpressionForTargetHashing() string {
+	// Return a dummy SQL expression for testing purposes
+	return "CONCAT(name, '|', CAST(score AS TEXT))"
+}
+
 var table = &seatbelt.DefaultTable{
 	TableDefinition:    *table_definition,
 	RowMapperAndHasher: &TestingRowMapperAndHasher{},
