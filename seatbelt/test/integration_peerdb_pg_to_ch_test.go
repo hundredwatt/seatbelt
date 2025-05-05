@@ -49,10 +49,10 @@ var table_definition = &seatbelt.TableDefinition{
 
 var table = &seatbelt.DefaultTable{
 	TableDefinition:    *table_definition,
-	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&postgres.PostgresSourceHasher{}, &clickhouse.ClickHouseTargetHasher{}, &row_mappers.PeerDBRowMapper{}),
+	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(&postgres.PostgresSourceHasher{}, &clickhouse.ClickHouseTargetHasher{}, row_mappers.NewPeerDBRowMapper(*table_definition)),
 }
 
-func TestClickhouse_Scan(t *testing.T) {
+func TestPeerDB_PG_To_CH(t *testing.T) {
 	ctx := context.Background()
 	pgxPool := openPgxPool(ctx, t)
 	defer pgxPool.Close()

@@ -407,23 +407,24 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 
 // createTable creates just the table component based on config
 func createTable(cfg *AppConfig) (seatbelt.Table, error) {
-	var rowMapper seatbelt.RowMapperAndHasher
-	switch cfg.RowMapperName {
-	case "peer_db":
-		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
-			&postgres.PostgresSourceHasher{},
-			&clickhouse.ClickHouseTargetHasher{},
-			&row_mappers.PeerDBRowMapper{},
-		)
-	default:
-		return nil, fmt.Errorf("unknown row_mapper_name: %s", cfg.RowMapperName)
-	}
-
 	tableDef := seatbelt.TableDefinition{
 		TableName:       cfg.TableName,
 		TargetTableName: cfg.TargetTableName,
 		PrimaryKeyName:  cfg.PrimaryKeyName,
 		Columns:         cfg.Columns,
+	}
+
+	var rowMapper seatbelt.RowMapperAndHasher
+	switch cfg.RowMapperName {
+	case "peer_db":
+		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
+		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
+			&postgres.PostgresSourceHasher{},
+			&clickhouse.ClickHouseTargetHasher{},
+			peerDbMapper,
+		)
+	default:
+		return nil, fmt.Errorf("unknown row_mapper_name: %s", cfg.RowMapperName)
 	}
 
 	table := &seatbelt.DefaultTable{
