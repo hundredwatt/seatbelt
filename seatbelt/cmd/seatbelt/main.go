@@ -219,6 +219,7 @@ var shadowCmd = &cobra.Command{
 			fmt.Println("--- EXPLAIN ANALYZE Result ---")
 			fmt.Println(plan)
 			fmt.Println("-----------------------------")
+			return
 		}
 
 		// Run UpdateShadow

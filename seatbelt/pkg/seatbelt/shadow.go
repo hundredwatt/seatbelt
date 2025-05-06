@@ -68,7 +68,7 @@ func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
 	// Ensure shadow table exists
 	_, err = db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS shadow (
-            pk BIGINT PRIMARY KEY,
+            pk BIGINT,
             source_signature BIGINT,
             target_signature UBIGINT,
             incremental_source_signature BIGINT,
@@ -149,8 +149,12 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, i
 			CAST(target_hash AS UBIGINT) AS target_signature
 		FROM '%s';
 	`, data_files.SourceChanges.File.Name())
+	createTemporaryNewShadowTableQuery := `
+		DROP TABLE IF EXISTS shadow_new;
+		CREATE TABLE shadow_new AS SELECT * FROM shadow WHERE 1=0;
+	`
 
-	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery} {
+	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery, createTemporaryNewShadowTableQuery} {
 		_, err := db.ExecContext(ctx, query)
 		if err != nil {
 			log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
@@ -179,21 +183,12 @@ func getUpsertQuery(initialLoad bool) string {
 			FALSE AS validation_error
 		FROM source_extract
 		FULL OUTER JOIN target ON source_extract.pk = target.pk
-		ORDER BY pk
-		ON CONFLICT (pk) DO UPDATE SET
-			source_signature = excluded.source_signature,
-			target_signature = excluded.target_signature,
-			incremental_source_signature = excluded.incremental_source_signature,
-			incremental_target_signature = excluded.incremental_target_signature,
-			source_operation = excluded.source_operation,
-			target_operation = excluded.target_operation,
-			validation_error = excluded.validation_error;
 		`
 	}
 
 	// Default upsert query for incremental updates
 	return `
-		INSERT INTO shadow
+		INSERT INTO shadow_new
 		SELECT
 			COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
 			source.source_signature AS source_signature,
@@ -228,15 +223,6 @@ func getUpsertQuery(initialLoad bool) string {
 		FULL OUTER JOIN target ON COALESCE(source.pk, shadow.pk) = target.pk
 		FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target.pk) = incremental.pk
 		-- WHERE clause for partitioning/range can be added here if needed
-		ORDER BY pk
-		ON CONFLICT (pk) DO UPDATE SET
-			source_signature = excluded.source_signature,
-			target_signature = excluded.target_signature,
-			incremental_source_signature = excluded.incremental_source_signature,
-			incremental_target_signature = excluded.incremental_target_signature,
-			source_operation = excluded.source_operation,
-			target_operation = excluded.target_operation,
-			validation_error = excluded.validation_error;
 	`
 }
 
@@ -361,13 +347,49 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 
 	// Get and execute the upsert query
+	// Begin a transaction for all shadow table operations
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Execute the upsert query within the transaction
 	upsertQuery := getUpsertQuery(cfg.InitialLoad)
 	upsertStart := time.Now()
-	_, err = db.ExecContext(ctx, upsertQuery)
+	_, err = tx.ExecContext(ctx, upsertQuery)
 	log.Printf("Upsert query completed in %v", time.Since(upsertStart))
 	if err != nil {
 		log.Printf("Error executing UPSERT query: %v\nQuery:\n%s", err, upsertQuery)
 		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
+	}
+
+	if !cfg.InitialLoad {
+		// Swap the new shadow table with the old shadow table within the transaction
+		_, err = tx.ExecContext(ctx, "ALTER TABLE shadow RENAME TO shadow_old;")
+		if err != nil {
+			return nil, fmt.Errorf("failed to rename shadow table: %w", err)
+		}
+
+		_, err = tx.ExecContext(ctx, "ALTER TABLE shadow_new RENAME TO shadow;")
+		if err != nil {
+			return nil, fmt.Errorf("failed to rename shadow table: %w", err)
+		}
+
+		_, err = tx.ExecContext(ctx, "DROP TABLE shadow_old;")
+		if err != nil {
+			return nil, fmt.Errorf("failed to drop shadow_old table: %w", err)
+		}
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	// Logic to calculate validation_status inline
