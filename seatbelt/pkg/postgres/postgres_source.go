@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -86,9 +87,13 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 
 	// Execute the COPY command and stream results to the file
 	log.Println("postgres scan query", copyQuery)
-	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, copyQuery)
+	bufferedWriter := bufio.NewWriter(osfile)
+	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, copyQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
+	}
+	if err := bufferedWriter.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush buffered writer: %w", err)
 	}
 
 	// Set the row count
@@ -238,9 +243,13 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 
 	// Execute the COPY command and stream results to the file
 	log.Println("postgres inspect scan query", query)
-	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, query)
+	bufferedWriter := bufio.NewWriter(osfile)
+	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
+	}
+	if err := bufferedWriter.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush buffered writer: %w", err)
 	}
 
 	// Set the row count
