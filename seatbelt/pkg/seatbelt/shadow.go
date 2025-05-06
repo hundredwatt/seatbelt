@@ -10,6 +10,13 @@ import (
 	_ "github.com/marcboeker/go-duckdb/v2" // Import the v2 DuckDB driver
 )
 
+// DuckDB Configuration
+const (
+	AllowUnsignedExtensions = true
+	Threads = 4
+	MemoryLimit = "8gb"
+)
+
 // ValidationMetrics holds the results of the validation check.
 type ValidationMetrics struct {
 	SourceSize   int64
@@ -45,7 +52,7 @@ func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
 	}
 
 	// Connect to DuckDB, allowing unsigned extensions
-	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=true", shadowPath))
+	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=%t&threads=%d&memory_limit=%s", shadowPath, AllowUnsignedExtensions, Threads, MemoryLimit))
 	if err != nil {
 		log.Printf("Error opening DuckDB: %v", err)
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)

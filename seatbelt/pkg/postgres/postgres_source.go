@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"log"
 
 	"seatbelt/pkg/seatbelt"
 
@@ -43,8 +44,15 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		safeFullTableName = pgx.Identifier{table.Name()}.Sanitize()
 	}
 
+	threads := os.Getenv("SEATBELT_POSTGRES_THREADS")
+	if threads == "" {
+		threads = "1"
+	}
+
 	// Build a SQL query to export directly to CSV using COPY
 	query := fmt.Sprintf(`
+		SET parallel_tuple_cost = 0.00001;
+		SET max_parallel_workers_per_gather = %s;
 		COPY (
 			SELECT 
 				%s as pk,
@@ -52,10 +60,12 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 			FROM %s
 		) TO STDOUT WITH (FORMAT csv, HEADER)
 	`,
+		threads,
 		table.PrimaryKey(),
 		table.SQLTextExpressionForSourceHashing(),
 		SEED, // Using the constant from default_source_hasher.go
 		safeFullTableName)
+
 
 	// Get a connection from the pool
 	conn, err := s.conn.Acquire(ctx)
@@ -65,6 +75,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 	defer conn.Release()
 
 	// Execute the COPY command and stream results to the file
+	log.Println("postgres scan query", query)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
@@ -97,6 +108,8 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		source_column_names[i] = column.Name + "::text"
 	}
 	query := fmt.Sprintf("SELECT %s, %s FROM %s", table.PrimaryKey(), strings.Join(source_column_names, ","), table.Name())
+
+	log.Println("postgres extract scan query", query)
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -214,6 +227,7 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 	defer conn.Release()
 
 	// Execute the COPY command and stream results to the file
+	log.Println("postgres inspect scan query", query)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
@@ -262,6 +276,7 @@ func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.
 		table.PrimaryKey(),
 		pksList)
 
+	log.Println("postgres inspect extract scan query", query)
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err
