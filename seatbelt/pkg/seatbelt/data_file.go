@@ -33,6 +33,10 @@ func (f *DataFile) Close() error {
 	return f.File.Close()
 }
 
+func (f *DataFile) IncrementRowCounter() {
+	f.RowCounter++
+}
+
 func (f *DataFile) SetRowCounter(rowCounter int64) {
 	f.RowCounter = rowCounter
 }

@@ -1,5 +1,5 @@
 ## All
-all: clean install copy-to-mini
+all: install copy-to-mini
 
 ## Test/Development Resources
 up:

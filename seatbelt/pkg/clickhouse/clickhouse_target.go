@@ -1,12 +1,13 @@
 package clickhouse
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"strings"
-	"log"
 
 	"seatbelt/pkg/seatbelt"
 
@@ -34,9 +35,13 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	bufferedWriter := bufio.NewWriter(file.File)
 
 	// Write header
-	file.WriteHeaderLine("pk,target_hash")
+	_, err = bufferedWriter.WriteString("pk,target_hash\n") // Simpler if DataFile doesn't handle bufio
+	if err != nil {
+		return nil, fmt.Errorf("failed to write header: %w", err)
+	}
 
 	// Set max_threads
 	threads := os.Getenv("SEATBELT_CLICKHOUSE_THREADS")
@@ -76,10 +81,14 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 		}
 
 		// Write row to file in format: id,hash
-		_, err = fmt.Fprintf(file.File, "%v,%d\n", id, hash)
+		_, err = fmt.Fprintf(bufferedWriter, "%v,%d\n", id, hash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to write to file: %w", err)
 		}
+	}
+
+	if err := bufferedWriter.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush writer: %w", err)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -102,9 +111,13 @@ func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	bufferedWriter := bufio.NewWriter(file.File)
 
 	// Write header
-	file.WriteHeaderLine("pk,target_hash,target_text")
+	_, err = bufferedWriter.WriteString("pk,target_hash,target_text\n") // Simpler if DataFile doesn't handle bufio
+	if err != nil {
+		return nil, fmt.Errorf("failed to write header: %w", err)
+	}
 
 	// Prepare the list of parameters for the IN clause
 	pksList := ""
@@ -147,10 +160,14 @@ func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table
 		escapedText := escapeCSVField(text)
 
 		// Write row to file in format: id,hash,text
-		_, err = fmt.Fprintf(file.File, "%v,%d,%s\n", id, hash, escapedText)
+		_, err = fmt.Fprintf(bufferedWriter, "%v,%d,%s\n", id, hash, escapedText)
 		if err != nil {
 			return nil, fmt.Errorf("failed to write to file: %w", err)
 		}
+	}
+
+	if err := bufferedWriter.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush writer: %w", err)
 	}
 
 	if err := rows.Err(); err != nil {

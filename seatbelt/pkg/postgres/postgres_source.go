@@ -114,9 +114,13 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	bufferedWriter := bufio.NewWriter(osfile)
 
-	// Write header
-	file.WriteHeaderLine("pk,source_hash,target_hash")
+	// Write header using the buffered writer
+	_, err = bufferedWriter.WriteString("pk,source_hash,target_hash\n")
+	if err != nil {
+		return nil, fmt.Errorf("failed to write header: %w", err)
+	}
 
 	source_column_names := make([]string, len(table.SourceColumns()))
 	for i, column := range table.SourceColumns() {
@@ -133,6 +137,7 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 
 	// Write the rows to the file
 	for rows.Next() {
+		file.IncrementRowCounter()
 		row, err := rows.Values()
 		if err != nil {
 			return nil, err
@@ -153,7 +158,27 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		source_row_hash := table.SourceHash(source_row_string)
 		target_row_hash := table.TargetHash(target_row_string)
 
-		file.WriteLine(fmt.Sprintf("%d,%s,%s", pk_val, source_row_hash, target_row_hash))
+		// Write line using the buffered writer
+		_, err = bufferedWriter.WriteString(fmt.Sprintf("%v,%s,%s\n", pk_val, source_row_hash, target_row_hash))
+		if err != nil {
+			// It's generally good to close the file or cleanup temp file on error here,
+			// but sticking to minimal changes for the buffering logic.
+			return nil, fmt.Errorf("failed to write line to buffer: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err(): %w", err)
+	}
+
+	// Flush the buffer
+	if err := bufferedWriter.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush buffered writer: %w", err)
+	}
+
+	// Reset file pointer to beginning for reading
+	if err := file.Rewind(); err != nil {
+		return nil, fmt.Errorf("error resetting file pointer: %w", err)
 	}
 
 	return file, nil
