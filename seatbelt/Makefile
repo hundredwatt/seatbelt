@@ -24,13 +24,16 @@ test:
 ## Build/Install
 # We don't really need this, as we can use `go run cmd/seatbelt/main.go` to run the program for development.
 build: ensure-build-dir
-	go build -o build/seatbelt ./cmd/seatbelt
+	git_hash=$$(git rev-parse --short HEAD) && \
+	go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt ./cmd/seatbelt
 
 build-intel: ensure-build-dir
-	GOOS=darwin GOARCH=amd64 go build -o build/seatbelt-intel ./cmd/seatbelt
+	git_hash=$$(git rev-parse --short HEAD) && \
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt-intel ./cmd/seatbelt
 
 install:
-	go install ./cmd/seatbelt
+	git_hash=$$(git rev-parse --short HEAD) && \
+	go install -ldflags="-X main.version=alpha-$$git_hash" ./cmd/seatbelt
 
 copy-to-mini: build-intel
 	scp build/seatbelt-intel macmini.lan:~/seatbelt

@@ -25,6 +25,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// Set during build time using -ldflags
+var version = "dev"
+
 // Config holds the application configuration loaded from YAML
 type AppConfig struct {
 	SourceConnectionString string                   `yaml:"source_connection_string"`
@@ -61,6 +64,7 @@ var rootCmd = &cobra.Command{
 	Long:  `Seatbelt helps ensure data consistency by comparing data between a source and a target system using cryptographic hashes and maintaining a shadow table.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// You can add global setup here if needed
+		fmt.Printf("Seatbelt %s\n", version)
 	},
 }
 

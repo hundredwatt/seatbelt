@@ -3,9 +3,9 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
-	"log"
 
 	"seatbelt/pkg/seatbelt"
 
@@ -49,24 +49,6 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		threads = "1"
 	}
 
-	// Build a SQL query to export directly to CSV using COPY
-	query := fmt.Sprintf(`
-		SET parallel_tuple_cost = 0.00001;
-		SET max_parallel_workers_per_gather = %s;
-		COPY (
-			SELECT 
-				%s as pk,
-				hashtextextended((%s), %d) AS source_hash
-			FROM %s
-		) TO STDOUT WITH (FORMAT csv, HEADER)
-	`,
-		threads,
-		table.PrimaryKey(),
-		table.SQLTextExpressionForSourceHashing(),
-		SEED, // Using the constant from default_source_hasher.go
-		safeFullTableName)
-
-
 	// Get a connection from the pool
 	conn, err := s.conn.Acquire(ctx)
 	if err != nil {
@@ -74,9 +56,37 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 	}
 	defer conn.Release()
 
+	// Execute SET commands to configure parallelism first
+	setParallelCostCmd := fmt.Sprintf("SET parallel_tuple_cost = 0.00001")
+	setMaxWorkersCmd := fmt.Sprintf("SET max_parallel_workers_per_gather = %s", threads)
+
+	_, err = conn.Exec(ctx, setParallelCostCmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set parallel_tuple_cost: %w", err)
+	}
+
+	_, err = conn.Exec(ctx, setMaxWorkersCmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set max_parallel_workers_per_gather: %w", err)
+	}
+
+	// Build just the COPY command (without the SET statements)
+	copyQuery := fmt.Sprintf(`
+		COPY (
+			SELECT 
+				%s as pk,
+				hashtextextended((%s), %d) AS source_hash
+			FROM %s
+		) TO STDOUT WITH (FORMAT csv, HEADER)
+	`,
+		table.PrimaryKey(),
+		table.SQLTextExpressionForSourceHashing(),
+		SEED, // Using the constant from default_source_hasher.go
+		safeFullTableName)
+
 	// Execute the COPY command and stream results to the file
-	log.Println("postgres scan query", query)
-	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, query)
+	log.Println("postgres scan query", copyQuery)
+	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, copyQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
 	}
