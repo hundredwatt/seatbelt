@@ -27,16 +27,16 @@ primary_key_name: "id"
 columns:
   - name: "smallint_col"
     source_type: "smallint"
-    target_type: "smallint"
+    target_type: "Int16"
   - name: "bigint_col"
     source_type: "bigint"
-    target_type: "bigint"
+    target_type: "Int64"
   - name: "float_col"
-    source_type: "float"
-    target_type: "float"
+    source_type: "real"
+    target_type: "Float32"
   - name: "double_col"
-    source_type: "double"
-    target_type: "double"
+    source_type: "double precision"
+    target_type: "Float64"
 # Note: Primary key column ('id' in this case) is typically handled implicitly
 # by the row mapper or core logic, but ensure it exists in both tables.
 

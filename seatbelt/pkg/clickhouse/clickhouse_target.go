@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 
 	"seatbelt/pkg/seatbelt"
 
@@ -80,4 +81,86 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	}
 
 	return file, nil
+}
+
+func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table, primaryKeys []int64) (*seatbelt.DataFile, error) {
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-inspect-clickhouse-scan-%s-*.csv", table.TargetName()))
+	if err != nil {
+		return nil, err
+	}
+	file := seatbelt.NewDataFile(osfile)
+
+	// Write header
+	file.WriteHeaderLine("pk,target_hash,target_text")
+
+	// Prepare the list of parameters for the IN clause
+	pksList := ""
+	for i, pk := range primaryKeys {
+		pksList += fmt.Sprintf("%d", pk)
+		if i < len(primaryKeys)-1 {
+			pksList += ","
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			%s AS pk,
+			xxh3(%s) AS target_hash,
+			replaceAll(replaceAll(%s, '\n', '\\n'), '\r', '\\r') AS target_text
+		FROM %s
+		WHERE %s IN (%s)
+	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.SQLTextExpressionForTargetHashing(), table.TargetName(), table.PrimaryKey(), pksList)
+
+	rows, err := t.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query on clickhouse: %w", err)
+	}
+	defer rows.Close()
+
+	// Process results
+	var rowCount int64
+	for rows.Next() {
+		rowCount++
+		var id interface{}
+		var hash uint64
+		var text string
+
+		if err := rows.Scan(&id, &hash, &text); err != nil {
+			return nil, fmt.Errorf("failed to scan row from clickhouse: %w", err)
+		}
+
+		// Escape text for CSV output
+		escapedText := escapeCSVField(text)
+
+		// Write row to file in format: id,hash,text
+		_, err = fmt.Fprintf(file.File, "%v,%d,%s\n", id, hash, escapedText)
+		if err != nil {
+			return nil, fmt.Errorf("failed to write to file: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during row iteration from clickhouse: %w", err)
+	}
+
+	// Set the row count and rewind the file
+	file.SetRowCounter(rowCount)
+	if err := file.Rewind(); err != nil {
+		return nil, fmt.Errorf("error resetting file pointer: %w", err)
+	}
+
+	return file, nil
+}
+
+// escapeCSVField properly escapes a field for CSV output
+func escapeCSVField(field string) string {
+	// Quote the field if it contains commas, quotes, or newlines (even escaped ones)
+	if strings.ContainsAny(field, ",\"") || strings.Contains(field, "\\n") || strings.Contains(field, "\\r") {
+		// Double up any quotes within the field
+		field = strings.ReplaceAll(field, "\"", "\"\"")
+		// Wrap the field in quotes
+		return "\"" + field + "\""
+	}
+	return field
 }

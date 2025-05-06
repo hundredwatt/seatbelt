@@ -153,3 +153,175 @@ func (s *PostgresSource) StartChangeStreamConsumer(ctx context.Context, table se
 
 	return consumer, nil
 }
+
+func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, primaryKeys []int64) (*seatbelt.DataFile, error) {
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-inspect-scan-%s-*.csv", table.Name()))
+	if err != nil {
+		return nil, err
+	}
+	file := seatbelt.NewDataFile(osfile)
+
+	// Split schema and table to sanitize properly
+	var safeFullTableName string
+	parts := strings.SplitN(table.Name(), ".", 2)
+	if len(parts) == 2 {
+		// We have schema.table format
+		schema := pgx.Identifier{parts[0]}.Sanitize()
+		tableName := pgx.Identifier{parts[1]}.Sanitize()
+		safeFullTableName = schema + "." + tableName
+	} else {
+		// Just table name, assume public schema
+		safeFullTableName = pgx.Identifier{table.Name()}.Sanitize()
+	}
+
+	// Create properly quoted primary key list
+	// For security, we must properly quote each primary key
+	pksList := ""
+	for i, pk := range primaryKeys {
+		// Use pgx.Identifier to sanitize each primary key value
+		// This prevents SQL injection attacks
+		pksList += fmt.Sprintf("%d", pk)
+		if i < len(primaryKeys)-1 {
+			pksList += ","
+		}
+	}
+
+	// Build a SQL query to export directly to CSV using COPY
+	query := fmt.Sprintf(`
+		COPY (
+			SELECT 
+				%s as pk,
+				hashtextextended((%s), %d) AS source_hash,
+				replace(replace(%s, E'\n', '\n'), E'\r', '\r') AS source_text
+			FROM %s
+			WHERE %s IN (%s)
+		) TO STDOUT WITH (FORMAT csv, HEADER)
+	`,
+		table.PrimaryKey(),
+		table.SQLTextExpressionForSourceHashing(),
+		SEED, // Using the constant from default_source_hasher.go
+		table.SQLTextExpressionForSourceHashing(),
+		safeFullTableName,
+		table.PrimaryKey(),
+		pksList)
+
+	// Get a connection from the pool
+	conn, err := s.conn.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	// Execute the COPY command and stream results to the file
+	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, osfile, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute COPY command: %w", err)
+	}
+
+	// Set the row count
+	file.SetRowCounter(commandTag.RowsAffected())
+
+	// Reset file pointer to beginning for reading
+	if err := file.Rewind(); err != nil {
+		return nil, fmt.Errorf("error resetting file pointer: %w", err)
+	}
+
+	return file, nil
+}
+
+func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.Table, primaryKeys []int64) (*seatbelt.DataFile, error) {
+	tempDir := os.Getenv(seatbelt.EnvTempDir)
+	osfile, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-inspect-extract-scan-%s-*.csv", table.Name()))
+	if err != nil {
+		return nil, err
+	}
+	file := seatbelt.NewDataFile(osfile)
+
+	// Write header
+	file.WriteHeaderLine("pk,source_hash,target_hash,source_text,target_text")
+
+	// Prepare the list of parameters for the IN clause
+	pksList := ""
+	for i, pk := range primaryKeys {
+		pksList += fmt.Sprintf("%d", pk)
+		if i < len(primaryKeys)-1 {
+			pksList += ","
+		}
+	}
+
+	source_column_names := make([]string, len(table.SourceColumns()))
+	for i, column := range table.SourceColumns() {
+		source_column_names[i] = column.Name + "::text"
+	}
+
+	query := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)",
+		table.PrimaryKey(),
+		strings.Join(source_column_names, ","),
+		table.Name(),
+		table.PrimaryKey(),
+		pksList)
+
+	rows, err := s.conn.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Write the rows to the file
+	for rows.Next() {
+		row, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		pk_val := row[0]
+		source_column_values := row[1:]
+
+		source_row_string, err := table.FormatSource(source_column_values)
+		if err != nil {
+			return nil, err
+		}
+		source_row_string = strings.ReplaceAll(source_row_string, "\n", "\\n")
+		source_row_string = strings.ReplaceAll(source_row_string, "\r", "\\r")
+
+		target_row_string, err := table.TransformSourceToCommon(source_column_values)
+		if err != nil {
+			return nil, err
+		}
+		target_row_string = strings.ReplaceAll(target_row_string, "\n", "\\n")
+		target_row_string = strings.ReplaceAll(target_row_string, "\r", "\\r")
+
+		source_row_hash := table.SourceHash(source_row_string)
+		target_row_hash := table.TargetHash(target_row_string)
+
+		// Escape source and target text for CSV output
+		source_row_string = escapeCSVField(source_row_string)
+		target_row_string = escapeCSVField(target_row_string)
+
+		file.WriteLine(fmt.Sprintf("%v,%s,%s,%s,%s",
+			pk_val,
+			source_row_hash,
+			target_row_hash,
+			source_row_string,
+			target_row_string))
+	}
+
+	// Reset file pointer to beginning for reading
+	if err := file.Rewind(); err != nil {
+		return nil, fmt.Errorf("error resetting file pointer: %w", err)
+	}
+
+	return file, nil
+}
+
+// escapeCSVField properly escapes a field for CSV output
+func escapeCSVField(field string) string {
+	// Quote the field if it contains commas, quotes, or newlines (even escaped ones)
+	if strings.ContainsAny(field, ",\"") || strings.Contains(field, "\\n") || strings.Contains(field, "\\r") {
+		// Double up any quotes within the field
+		field = strings.ReplaceAll(field, "\"", "\"\"")
+		// Wrap the field in quotes
+		return "\"" + field + "\""
+	}
+	return field
+}

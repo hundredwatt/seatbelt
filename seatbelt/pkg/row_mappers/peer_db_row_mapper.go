@@ -63,15 +63,17 @@ func transformValue(value interface{}, family typesystem.TypeFamily) string {
 		return "0" // Use NULL representation for nil (Changed from "0")
 	}
 
-	// Special handling for strings that might represent floats (needed before general family switch)
-	if strVal, ok := value.(string); ok {
-		if family == typesystem.FloatFamily || family == typesystem.DecimalFamily {
-			return transformFloatString(strVal)
-		}
-		// Otherwise, return other strings as-is, handled by the default case below
-	}
 
-	return value.(string)
+	switch family {
+	case typesystem.FloatFamily:
+		return transformFloatString(value.(string))
+	case typesystem.DecimalFamily:
+		return transformDecimalString(value.(string))
+	case typesystem.DateTimeFamily:
+		return transformDateTimeString(value.(string))
+	default:
+		return value.(string)
+	}
 }
 
 // formatValueByFamily formats a value based on its general TypeFamily.
@@ -126,6 +128,31 @@ func transformFloatString(s string) string {
 		// Normalize scientific notation like "e+" to "e"
 		return strings.ReplaceAll(s, "e+", "e")
 	}
+}
+
+func transformDecimalString(s string) string {
+	// Remove trailing zeros after decimal point
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		// If we removed all digits after decimal point, remove the decimal point too
+		s = strings.TrimRight(s, ".")
+	}
+	return s
+}
+
+func transformDateTimeString(s string) string {
+	// Parse the timestamp string
+	t, err := time.Parse("2006-01-02 15:04:05", s)
+	if err == nil {
+		// Convert from local time to UTC, accounting for DST
+		// The time is parsed without timezone info, so we need to set the location first
+		loc, _ := time.LoadLocation("America/Denver") // Mountain Time
+		localTime := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+		utcTime := localTime.UTC()
+		// Format with microsecond precision
+		return utcTime.Format("2006-01-02 15:04:05.000000")
+	}
+	return s
 }
 
 /*

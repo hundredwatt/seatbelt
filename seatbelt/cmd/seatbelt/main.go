@@ -22,6 +22,7 @@ import (
 	// Import necessary DB drivers and packages
 	_ "github.com/ClickHouse/clickhouse-go/v2" // ClickHouse driver
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/spf13/pflag"
 )
 
 // Config holds the application configuration loaded from YAML
@@ -45,6 +46,13 @@ var (
 	sourceChangesFile string
 	explainAnalyze    bool
 	initialLoad       bool
+	primaryKeys       []int64
+	columnNames       []string
+
+	// Flags specific to shadow command
+	shadowPath              string
+	shadowInitialLoad       bool // Use a separate variable for shadow's initial-load flag
+	shadowSourceExtractFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -137,51 +145,69 @@ var shadowCmd = &cobra.Command{
 	Short: "Update the shadow table using pre-existing data files",
 	Long:  `Updates the shadow table using data files provided via flags, skipping the data fetch phase. Allows optional EXPLAIN ANALYZE.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if sourceScanFile == "" || targetScanFile == "" || sourceChangesFile == "" {
-			log.Fatal("Source scan, target scan, and source changes file paths must be provided for shadow update.")
+		// Validate required flags conditionally
+		if targetScanFile == "" {
+			log.Fatal("--target-scan file path must be provided.")
+		}
+		if shadowInitialLoad {
+			if shadowSourceExtractFile == "" {
+				log.Fatal("--source-extract-scan file path must be provided when --initial-load is true.")
+			}
+		} else {
+			if sourceScanFile == "" || sourceChangesFile == "" {
+				log.Fatal("--source-scan and --source-changes file paths must be provided when --initial-load is false.")
+			}
 		}
 
 		// Minimal config needed for UpdateShadow when files are provided
 		seatbeltCfg := &seatbelt.Config{
-			ShadowPath: "", // Shadow path might be specified via flag if needed, or use default
-			// Table, Source, Target are not strictly needed if we just call UpdateShadow
-			// but UpdateShadow currently takes the full config. We might need to refactor
-			// UpdateShadow or pass dummy components. For now, let's create a temporary config.
+			ShadowPath:  shadowPath,        // Use shadow path from flag
+			InitialLoad: shadowInitialLoad, // Use initial load from flag
+			// Table, Source, Target are not strictly needed for shadow update
 		}
-		// ShadowPath might need a flag as well if not using :memory:
-		// explainAnalyze flag is handled within UpdateShadow (needs implementation)
 
 		ctx := context.Background()
 
-		// Open the provided files
-		sourceScanF, err := os.OpenFile(sourceScanFile, os.O_RDONLY, 0)
-		if err != nil {
-			log.Fatalf("Error opening source scan file %s: %v", sourceScanFile, err)
-		}
-		defer sourceScanF.Close()
-
+		// --- Open required files ---
 		targetScanF, err := os.OpenFile(targetScanFile, os.O_RDONLY, 0)
 		if err != nil {
 			log.Fatalf("Error opening target scan file %s: %v", targetScanFile, err)
 		}
 		defer targetScanF.Close()
 
-		sourceChangesF, err := os.OpenFile(sourceChangesFile, os.O_RDONLY, 0)
-		if err != nil {
-			log.Fatalf("Error opening source changes file %s: %v", sourceChangesFile, err)
-		}
-		defer sourceChangesF.Close()
-
+		var sourceScanF, sourceChangesF, sourceExtractF *os.File
 		dataFiles := &seatbelt.DataFileSet{
-			SourceScan:    seatbelt.NewDataFile(sourceScanF),
-			TargetScan:    seatbelt.NewDataFile(targetScanF),
-			SourceChanges: seatbelt.NewDataFile(sourceChangesF),
-			// SourceExtractScan is not typically used in shadow-only update, assumed nil
+			TargetScan: seatbelt.NewDataFile(targetScanF),
 		}
 
-		// TODO: Implement EXPLAIN ANALYZE logic within UpdateShadow or as a separate function call
+		if shadowInitialLoad {
+			sourceExtractF, err = os.OpenFile(shadowSourceExtractFile, os.O_RDONLY, 0)
+			if err != nil {
+				log.Fatalf("Error opening source extract scan file %s: %v", shadowSourceExtractFile, err)
+			}
+			defer sourceExtractF.Close()
+			dataFiles.SourceExtractScan = seatbelt.NewDataFile(sourceExtractF)
+		} else {
+			sourceScanF, err = os.OpenFile(sourceScanFile, os.O_RDONLY, 0)
+			if err != nil {
+				log.Fatalf("Error opening source scan file %s: %v", sourceScanFile, err)
+			}
+			defer sourceScanF.Close()
+			dataFiles.SourceScan = seatbelt.NewDataFile(sourceScanF)
+
+			sourceChangesF, err = os.OpenFile(sourceChangesFile, os.O_RDONLY, 0)
+			if err != nil {
+				log.Fatalf("Error opening source changes file %s: %v", sourceChangesFile, err)
+			}
+			defer sourceChangesF.Close()
+			dataFiles.SourceChanges = seatbelt.NewDataFile(sourceChangesF)
+		}
+		// --- End File Opening ---
+
+		// Handle EXPLAIN ANALYZE
 		if explainAnalyze {
 			fmt.Println("EXPLAIN ANALYZE shadow update requested...")
+			// Pass seatbeltCfg directly, which now contains InitialLoad
 			plan, err := seatbelt.ExplainAnalyzeUpdateShadow(ctx, seatbeltCfg, dataFiles)
 			if err != nil {
 				log.Fatalf("Error running EXPLAIN ANALYZE: %v", err)
@@ -191,7 +217,9 @@ var shadowCmd = &cobra.Command{
 			fmt.Println("-----------------------------")
 		}
 
+		// Run UpdateShadow
 		fmt.Println("Updating shadow table from files...")
+		// Pass seatbeltCfg directly, which now contains InitialLoad
 		metrics, err := seatbelt.UpdateShadow(ctx, seatbeltCfg, dataFiles)
 		if err != nil {
 			log.Fatalf("Error updating shadow table from files: %v", err)
@@ -384,6 +412,131 @@ var benchTargetScanCmd = &cobra.Command{
 	},
 }
 
+var inspectCmd = &cobra.Command{
+	Use:   "inspect",
+	Short: "Inspect specific rows by primary keys",
+	Long:  `Inspect specific rows from source and target databases by their primary keys. Runs InspectScan and InspectExtractScan on the source and InspectScan on the target.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg, err := loadConfig(configFile)
+		if err != nil {
+			log.Fatalf("Error loading config file '%s': %v", configFile, err)
+		}
+
+		if len(primaryKeys) == 0 {
+			log.Fatal("At least one primary key must be provided")
+		}
+
+		ctx := context.Background()
+
+		// Create Components (Source, Target, Table)
+		source, target, table, sourceCleanup, targetCleanup, err := createComponents(ctx, cfg)
+		if err != nil {
+			log.Fatalf("Error creating components: %v", err)
+		}
+		// Defer cleanup functions to close connections when done
+		defer sourceCleanup()
+		defer targetCleanup()
+
+		// Filter table columns if column names are provided
+		if len(columnNames) > 0 {
+			// Create a map for quick lookup of column names
+			columnsMap := make(map[string]bool)
+			for _, col := range columnNames {
+				columnsMap[col] = true
+			}
+
+			// Always ensure the primary key is included
+			columnsMap[cfg.PrimaryKeyName] = true
+
+			// Get the current table definition
+			defaultTable, ok := table.(*seatbelt.DefaultTable)
+			if !ok {
+				log.Fatalf("Unexpected table type, cannot filter columns")
+			}
+
+			// Filter the table definition's columns based on the provided list
+			var filteredColumns []seatbelt.ColumnMapping
+			for _, col := range defaultTable.Columns {
+				if columnsMap[col.Name] {
+					filteredColumns = append(filteredColumns, col)
+				}
+			}
+
+			// Create a new table definition with filtered columns
+			filteredTableDef := seatbelt.TableDefinition{
+				SourceDatabase:  defaultTable.SourceDatabase,
+				TargetDatabase:  defaultTable.TargetDatabase,
+				TableName:       defaultTable.TableName,
+				TargetTableName: defaultTable.TargetTableName,
+				PrimaryKeyName:  defaultTable.PrimaryKeyName,
+				Columns:         filteredColumns,
+			}
+
+			// Create a new row mapper with the filtered table definition
+			var rowMapper seatbelt.RowMapperAndHasher
+			switch cfg.RowMapperName {
+			case "peer_db":
+				peerDbMapper := row_mappers.NewPeerDBRowMapper(filteredTableDef)
+				rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
+					&postgres.PostgresSourceHasher{TableDefinition: &filteredTableDef},
+					&clickhouse.ClickHouseTargetHasher{TableDefinition: &filteredTableDef},
+					peerDbMapper,
+				)
+			default:
+				log.Fatalf("Unknown row_mapper_name: %s", cfg.RowMapperName)
+			}
+
+			// Create a new table with the filtered definition
+			table = &seatbelt.DefaultTable{
+				TableDefinition:    filteredTableDef,
+				RowMapperAndHasher: rowMapper,
+			}
+
+			fmt.Printf("Using filtered columns: %v\n", columnNames)
+		}
+
+		// Cast source and target to their inspector interfaces
+		sourceInspector, ok := source.(seatbelt.SourceInspector)
+		if !ok {
+			log.Fatalf("Source does not implement SourceInspector interface")
+		}
+
+		targetInspector, ok := target.(seatbelt.TargetInspector)
+		if !ok {
+			log.Fatalf("Target does not implement TargetInspector interface")
+		}
+
+		// Run all inspect methods
+		fmt.Println("Running source inspect scan...")
+		sourceScan, err := sourceInspector.InspectScan(ctx, table, primaryKeys)
+		if err != nil {
+			log.Fatalf("Error running source inspect scan: %v", err)
+		}
+		fmt.Printf("Source inspect scan completed: %s (%d rows)\n", sourceScan.Name(), sourceScan.RowCount())
+
+		fmt.Println("Running source inspect extract scan...")
+		sourceExtractScan, err := sourceInspector.InspectExtractScan(ctx, table, primaryKeys)
+		if err != nil {
+			log.Fatalf("Error running source inspect extract scan: %v", err)
+		}
+		fmt.Printf("Source inspect extract scan completed: %s (%d rows)\n", sourceExtractScan.Name(), sourceExtractScan.RowCount())
+
+		fmt.Println("Running target inspect scan...")
+		targetScan, err := targetInspector.InspectScan(ctx, table, primaryKeys)
+		if err != nil {
+			log.Fatalf("Error running target inspect scan: %v", err)
+		}
+		fmt.Printf("Target inspect scan completed: %s (%d rows)\n", targetScan.Name(), targetScan.RowCount())
+
+		fmt.Println("\nInspect Results:")
+		fmt.Println("----------------------------")
+		fmt.Printf("Source inspect scan file: %s\n", sourceScan.Name())
+		fmt.Printf("Source inspect extract scan file: %s\n", sourceExtractScan.Name())
+		fmt.Printf("Target inspect scan file: %s\n", targetScan.Name())
+		fmt.Println("----------------------------")
+	},
+}
+
 func loadConfig(path string) (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -440,6 +593,8 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 
 	// --- Create Table Definition --- (Moved from createTable)
 	tableDef := seatbelt.TableDefinition{
+		SourceDatabase:  seatbelt.POSTGRES,
+		TargetDatabase:  seatbelt.CLICKHOUSE,
 		TableName:       cfg.TableName,
 		TargetTableName: cfg.TargetTableName,
 		PrimaryKeyName:  cfg.PrimaryKeyName,
@@ -468,8 +623,8 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 		// Pass the determined database names
 		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
 		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
-			&postgres.PostgresSourceHasher{}, // Assuming these are still correct
-			&clickhouse.ClickHouseTargetHasher{},
+			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
+			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
 			peerDbMapper,
 		)
 	default:
@@ -566,14 +721,17 @@ func init() {
 	rootCmd.AddCommand(fetchCmd)
 
 	// Flags for 'shadow' command
-	shadowCmd.Flags().StringVar(&sourceScanFile, "source-scan", "", "Path to the source scan data file (required)")
+	shadowCmd.Flags().StringVar(&sourceScanFile, "source-scan", "", "Path to the source scan data file (required if not initial load)")
 	shadowCmd.Flags().StringVar(&targetScanFile, "target-scan", "", "Path to the target scan data file (required)")
-	shadowCmd.Flags().StringVar(&sourceChangesFile, "source-changes", "", "Path to the source changes data file (required)")
-	shadowCmd.Flags().BoolVar(&explainAnalyze, "explain", false, "Run EXPLAIN ANALYZE on the shadow update query (implementation pending)")
-	// Mark flags as required for shadow command
-	shadowCmd.MarkFlagRequired("source-scan")
-	shadowCmd.MarkFlagRequired("target-scan")
-	shadowCmd.MarkFlagRequired("source-changes")
+	shadowCmd.Flags().StringVar(&sourceChangesFile, "source-changes", "", "Path to the source changes data file (required if not initial load)")
+	shadowCmd.Flags().StringVar(&shadowSourceExtractFile, "source-extract-scan", "", "Path to the source extract scan data file (required for initial load)")
+	shadowCmd.Flags().StringVar(&shadowPath, "shadow-path", ":memory:", "Path to the shadow database file or :memory:")
+	shadowCmd.Flags().BoolVar(&shadowInitialLoad, "initial-load", false, "Perform initial load using source-extract-scan")
+	shadowCmd.Flags().BoolVar(&explainAnalyze, "explain", false, "Run EXPLAIN ANALYZE on the shadow update query")
+	// Remove explicit required marking - validation happens in Run
+	// shadowCmd.MarkFlagRequired("source-scan") // Removed
+	// shadowCmd.MarkFlagRequired("target-scan") // Removed - checked in Run
+	// shadowCmd.MarkFlagRequired("source-changes") // Removed
 	rootCmd.AddCommand(shadowCmd)
 
 	// Register benchmark commands
@@ -581,6 +739,19 @@ func init() {
 	benchmarkCmd.AddCommand(benchSourceExtractScanCmd)
 	benchmarkCmd.AddCommand(benchTargetScanCmd)
 	rootCmd.AddCommand(benchmarkCmd)
+
+	// Register inspect command
+	inspectCmd.Flags().Int64SliceVar(&primaryKeys, "pks", []int64{}, "Primary keys to inspect (comma-separated)")
+	inspectCmd.Flags().StringSliceVar(&columnNames, "cols", []string{}, "Column names to include (comma-separated)")
+	// Set column-names as an alias for cols
+	inspectCmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		if name == "column-names" {
+			name = "cols"
+		}
+		return pflag.NormalizedName(name)
+	})
+	inspectCmd.MarkFlagRequired("pks")
+	rootCmd.AddCommand(inspectCmd)
 }
 
 func main() {

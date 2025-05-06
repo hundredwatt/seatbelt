@@ -19,3 +19,13 @@ type ChangeStreamConsumer interface {
 type Target interface {
 	Scan(ctx context.Context, table Table) (*DataFile, error)
 }
+
+// Inspector interface
+type SourceInspector interface {
+	InspectScan(ctx context.Context, table Table, primaryKeys []int64) (*DataFile, error)
+	InspectExtractScan(ctx context.Context, table Table, primaryKeys []int64) (*DataFile, error)
+}
+
+type TargetInspector interface {
+	InspectScan(ctx context.Context, table Table, primaryKeys []int64) (*DataFile, error)
+}
