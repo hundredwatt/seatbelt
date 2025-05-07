@@ -144,13 +144,8 @@ func transformDateTimeString(s string) string {
 	// Parse the timestamp string
 	t, err := time.Parse("2006-01-02 15:04:05", s)
 	if err == nil {
-		// Convert from local time to UTC, accounting for DST
-		// The time is parsed without timezone info, so we need to set the location first
-		loc, _ := time.LoadLocation("America/Denver") // Mountain Time
-		localTime := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
-		utcTime := localTime.UTC()
 		// Format with microsecond precision
-		return utcTime.Format("2006-01-02 15:04:05.000000")
+		return t.Format("2006-01-02 15:04:05.000000")
 	}
 	return s
 }

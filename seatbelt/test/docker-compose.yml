@@ -35,6 +35,7 @@ services:
       - ./clickhouse-init:/docker-entrypoint-initdb.d
       - ../tmp/clickhouse_data:/var/lib/clickhouse
       - ./clickhouse-listen.xml:/etc/clickhouse-server/config.d/listen.xml
+      - ./clickhouse-timezone.xml:/etc/clickhouse-server/config.d/timezone.xml
     environment:
       CLICKHOUSE_DB: peerdb
       CLICKHOUSE_USER: default
