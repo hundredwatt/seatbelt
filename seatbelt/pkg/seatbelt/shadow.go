@@ -59,7 +59,8 @@ const(
             incremental_target_signature UBIGINT,
             source_operation UTINYINT,
             target_operation UTINYINT,
-            validation_error BOOLEAN
+            validation_error BOOLEAN,
+			target_count UTINYINT
         )
     `
 	createSourceExtractViewSQLTemplate = `
@@ -98,25 +99,42 @@ const(
 	`
 	initialLoadUpsertSQL = `
 		INSERT INTO shadow
+		WITH target_dupes_counted AS (
+			SELECT
+				pk,
+				ANY_VALUE(target_signature) AS target_signature,
+				COUNT(*) AS target_count
+			FROM target
+			GROUP BY pk
+		)
 		SELECT
-			COALESCE(source_extract.pk, target.pk) AS pk,
+			COALESCE(source_extract.pk, target_dupes_counted.pk) AS pk,
 			source_extract.source_signature AS source_signature,
-			target.target_signature AS target_signature,
+			target_dupes_counted.target_signature AS target_signature,
 			source_extract.source_signature AS incremental_source_signature,
 			source_extract.target_signature AS incremental_target_signature,
 			-- Initial load always treats records as inserts
 			3 AS latest_source_operation, -- OpInsert
-			CASE WHEN target.target_signature IS NULL THEN 1 ELSE 3 END AS latest_target_operation, -- OpDoesNotExist or OpInsert
-			FALSE AS validation_error
+			CASE WHEN target_dupes_counted.target_signature IS NULL THEN 1 ELSE 3 END AS latest_target_operation, -- OpDoesNotExist or OpInsert
+			FALSE AS validation_error,
+			target_dupes_counted.target_count AS target_count
 		FROM source_extract
-		FULL OUTER JOIN target ON source_extract.pk = target.pk
+		FULL OUTER JOIN target_dupes_counted ON source_extract.pk = target_dupes_counted.pk
 		`
 	incrementalUpdateUpsertSQL = `
 		INSERT INTO shadow_new
+		WITH target_dupes_counted AS (
+			SELECT
+				pk,
+				ANY_VALUE(target_signature) AS target_signature,
+				COUNT(*) AS target_count
+			FROM target
+			GROUP BY pk
+		)
 		SELECT
-			COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
+			COALESCE(source.pk, target_dupes_counted.pk, incremental.pk, shadow.pk) AS pk,
 			source.source_signature AS source_signature,
-			target.target_signature AS target_signature,
+			target_dupes_counted.target_signature AS target_signature,
 			COALESCE(incremental.source_signature, shadow.incremental_source_signature) AS incremental_source_signature,
 			COALESCE(incremental.target_signature, shadow.incremental_target_signature) AS incremental_target_signature,
 			-- Use specific signature type function, assuming INT here
@@ -125,7 +143,7 @@ const(
 				shadow.source_signature
 			) AS latest_source_operation,
 			determine_source_operation_uint(
-				target.target_signature,
+				target_dupes_counted.target_signature,
 				shadow.target_signature
 			) AS latest_target_operation,
 			check_for_validation_error_with_row_integrity(
@@ -139,13 +157,14 @@ const(
 					incremental.source_signature,
 					incremental.target_signature,
 					source.source_signature,
-					target.target_signature
+					target_dupes_counted.target_signature
 				)
-			) AS validation_error
+			) AS validation_error,
+			target_dupes_counted.target_count AS target_count
 		FROM source
 		FULL OUTER JOIN shadow ON source.pk = shadow.pk
-		FULL OUTER JOIN target ON COALESCE(source.pk, shadow.pk) = target.pk
-		FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target.pk) = incremental.pk
+		FULL OUTER JOIN target_dupes_counted ON COALESCE(source.pk, shadow.pk) = target_dupes_counted.pk
+		FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target_dupes_counted.pk) = incremental.pk
 		-- WHERE clause for partitioning/range can be added here if needed
 	`
 	validationStatusCaseStmtSQL = `
@@ -173,6 +192,7 @@ const(
                         -- Gone conditions from Python UDF
                         source_operation IN (%[6]d, %[7]d) AND target_operation IN (%[6]d, %[7]d)
                     ) THEN %[3]d -- StatusGone
+					WHEN target_count > 1 THEN %[4]d -- StatusError
                     ELSE %[1]d -- StatusValid
                 END
         END
@@ -188,7 +208,7 @@ const(
             COUNT(source_signature) FILTER (WHERE source_signature IS NOT NULL) AS source_size,
             COUNT(target_signature) FILTER (WHERE target_signature IS NOT NULL) AS target_size,
             COUNT(*) AS seatbelt_size,
-            COUNT(*) FILTER (WHERE validation_error = TRUE) AS error_count,
+            COUNT(*) FILTER (WHERE validation_status = %[4]d) AS error_count,
             COUNT(*) FILTER (WHERE validation_status = %[2]d) AS pending_count, -- StatusPending
             COUNT(*) FILTER (WHERE validation_status = %[3]d) AS valid_count   -- StatusValid
         FROM StatusCTE;
@@ -409,7 +429,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 
 	// Calculate metrics
-	metricsQuery := fmt.Sprintf(metricsQuerySQLTemplate, validationStatusLogic, StatusPending, StatusValid)
+	metricsQuery := fmt.Sprintf(metricsQuerySQLTemplate, validationStatusLogic, StatusPending, StatusValid, StatusError)
 
 	metricsStart := time.Now()
 	metrics := &ValidationMetrics{}
