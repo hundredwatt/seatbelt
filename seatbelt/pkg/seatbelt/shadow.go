@@ -13,9 +13,11 @@ import (
 // DuckDB Configuration
 const (
 	AllowUnsignedExtensions = true
-	Threads = 4
-	MemoryLimit = "8gb"
+	Threads                 = 4
+	MemoryLimit             = "8gb"
 )
+
+
 
 // ValidationMetrics holds the results of the validation check.
 type ValidationMetrics struct {
@@ -45,28 +47,10 @@ const (
 	StatusGone    int = 3
 )
 
-// setupDuckDB connects to DuckDB and initializes the shadow table
-func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
-	if shadowPath == "" {
-		shadowPath = ":memory:"
-	}
-
-	// Connect to DuckDB, allowing unsigned extensions
-	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=%t&threads=%d&memory_limit=%s", shadowPath, AllowUnsignedExtensions, Threads, MemoryLimit))
-	if err != nil {
-		log.Printf("Error opening DuckDB: %v", err)
-		return nil, fmt.Errorf("failed to open duckdb: %w", err)
-	}
-
-	// Load the seatbelt_duckdb extension
-	_, err = db.ExecContext(ctx, "LOAD seatbelt_duckdb;")
-	if err != nil {
-		log.Printf("Error loading seatbelt_duckdb extension: %v", err)
-		// Continue anyway, maybe it's already loaded or built-in
-	}
-
-	// Ensure shadow table exists
-	_, err = db.ExecContext(ctx, `
+// SQL Queries
+const(
+	loadSeatbeltDuckDBExtensionSQL = `LOAD seatbelt_duckdb;`
+	createShadowTableSQL           = `
         CREATE TABLE IF NOT EXISTS shadow (
             pk BIGINT,
             source_signature BIGINT,
@@ -77,99 +61,42 @@ func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
             target_operation UTINYINT,
             validation_error BOOLEAN
         )
-    `)
-	if err != nil {
-		log.Printf("Error creating shadow table: %v", err)
-		return nil, fmt.Errorf("failed to create shadow table: %w", err)
-	}
-
-	return db, nil
-}
-
-// createDataViews creates temporary views for source, target, and incremental scans
-func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, initialLoad bool) error {
-	// For initial load, we only create source_extract and target views
-	if initialLoad {
-		if data_files.SourceExtractScan == nil || data_files.TargetScan == nil {
-			return fmt.Errorf("source extract scan and target scan are required for initial load")
-		}
-
-		createSourceExtractViewQuery := fmt.Sprintf(`
+    `
+	createSourceExtractViewSQLTemplate = `
 			CREATE TEMP VIEW source_extract AS 
 			SELECT 
 				CAST(pk AS BIGINT) AS pk,
 				CAST(source_hash AS BIGINT) AS source_signature,
 				CAST(target_hash AS UBIGINT) AS target_signature
 			FROM '%s';
-		`, data_files.SourceExtractScan.File.Name())
-
-		createTargetViewQuery := fmt.Sprintf(`
+		`
+	createTargetViewSQLTemplate = `
 			CREATE TEMP VIEW target AS 
 			SELECT 
 				CAST(pk AS BIGINT) AS pk,
 				CAST(target_hash AS UBIGINT) AS target_signature
 			FROM '%s';
-		`, data_files.TargetScan.File.Name())
-
-		for _, query := range []string{createSourceExtractViewQuery, createTargetViewQuery} {
-			_, err := db.ExecContext(ctx, query)
-			if err != nil {
-				log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
-				return fmt.Errorf("failed to create view: %w", err)
-			}
-		}
-		return nil
-	}
-
-	// Regular incremental update - create all three views
-	if data_files.SourceScan == nil || data_files.TargetScan == nil || data_files.SourceChanges == nil {
-		return fmt.Errorf("source scan, target scan, and source changes are required for incremental update")
-	}
-
-	// Create VIEWs for the source, target, and incremental scans
-	createSourceViewQuery := fmt.Sprintf(`
+		`
+	createSourceViewSQLTemplate = `
 		CREATE TEMP VIEW source AS 
 		SELECT 
 			CAST(pk AS BIGINT) AS pk,
 			CAST(source_hash AS BIGINT) AS source_signature
 		FROM '%s';
-	`, data_files.SourceScan.File.Name())
-	createTargetViewQuery := fmt.Sprintf(`
-		CREATE TEMP VIEW target AS 
-		SELECT 
-			CAST(pk AS BIGINT) AS pk,
-			CAST(target_hash AS UBIGINT) AS target_signature
-		FROM '%s';
-	`, data_files.TargetScan.File.Name())
-	createIncrementalViewQuery := fmt.Sprintf(`
+	`
+	createIncrementalViewSQLTemplate = `
 		CREATE TEMP VIEW incremental AS 
 		SELECT 
 			CAST(pk AS BIGINT) AS pk,
 			CAST(source_hash AS BIGINT) AS source_signature,
 			CAST(target_hash AS UBIGINT) AS target_signature
 		FROM '%s';
-	`, data_files.SourceChanges.File.Name())
-	createTemporaryNewShadowTableQuery := `
+	`
+	dropAndCreateShadowNewTableSQL = `
 		DROP TABLE IF EXISTS shadow_new;
 		CREATE TABLE shadow_new AS SELECT * FROM shadow WHERE 1=0;
 	`
-
-	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery, createTemporaryNewShadowTableQuery} {
-		_, err := db.ExecContext(ctx, query)
-		if err != nil {
-			log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
-			return fmt.Errorf("failed to create view: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// getUpsertQuery returns the main UPSERT query used to update the shadow table
-func getUpsertQuery(initialLoad bool) string {
-	if initialLoad {
-		// For initial load, use source_extract in place of source and incremental
-		return `
+	initialLoadUpsertSQL = `
 		INSERT INTO shadow
 		SELECT
 			COALESCE(source_extract.pk, target.pk) AS pk,
@@ -184,10 +111,7 @@ func getUpsertQuery(initialLoad bool) string {
 		FROM source_extract
 		FULL OUTER JOIN target ON source_extract.pk = target.pk
 		`
-	}
-
-	// Default upsert query for incremental updates
-	return `
+	incrementalUpdateUpsertSQL = `
 		INSERT INTO shadow_new
 		SELECT
 			COALESCE(source.pk, target.pk, incremental.pk, shadow.pk) AS pk,
@@ -224,11 +148,7 @@ func getUpsertQuery(initialLoad bool) string {
 		FULL OUTER JOIN incremental ON COALESCE(source.pk, shadow.pk, target.pk) = incremental.pk
 		-- WHERE clause for partitioning/range can be added here if needed
 	`
-}
-
-// getValidationStatusCaseStmt returns the CASE statement for calculating validation status
-func getValidationStatusCaseStmt() string {
-	return `
+	validationStatusCaseStmtSQL = `
         CASE
             WHEN validation_error THEN %[4]d -- StatusError
             ELSE
@@ -257,19 +177,7 @@ func getValidationStatusCaseStmt() string {
                 END
         END
     `
-}
-
-// getValidationStatusLogic formats the validation status case statement with constants
-func getValidationStatusLogic() string {
-	return fmt.Sprintf(getValidationStatusCaseStmt(),
-		StatusValid, StatusPending, StatusGone, StatusError, // 1, 2, 3, 4
-		OpNoop, OpDoesNotExist, OpDelete, // 5, 6, 7
-	)
-}
-
-// getMetricsQuery returns the query for calculating validation metrics
-func getMetricsQuery(validationStatusLogic string) string {
-	return fmt.Sprintf(`
+	metricsQuerySQLTemplate = `
         WITH StatusCTE AS (
             SELECT
                 *,
@@ -284,7 +192,88 @@ func getMetricsQuery(validationStatusLogic string) string {
             COUNT(*) FILTER (WHERE validation_status = %[2]d) AS pending_count, -- StatusPending
             COUNT(*) FILTER (WHERE validation_status = %[3]d) AS valid_count   -- StatusValid
         FROM StatusCTE;
-	`, validationStatusLogic, StatusPending, StatusValid)
+	`
+	alterTableRenameShadowToShadowOldSQL = `ALTER TABLE shadow RENAME TO shadow_old;`
+	alterTableRenameShadowNewToShadowSQL = `ALTER TABLE shadow_new RENAME TO shadow;`
+	dropTableShadowOldSQL                = `DROP TABLE shadow_old;`
+	deleteGoneRowsSQLTemplate            = `
+        DELETE FROM shadow
+        WHERE (%s) = %[2]d -- StatusGone
+    `
+)
+
+// setupDuckDB connects to DuckDB and initializes the shadow table
+func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
+	if shadowPath == "" {
+		shadowPath = ":memory:"
+	}
+
+	// Connect to DuckDB, allowing unsigned extensions
+	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=%t&threads=%d&memory_limit=%s", shadowPath, AllowUnsignedExtensions, Threads, MemoryLimit))
+	if err != nil {
+		log.Printf("Error opening DuckDB: %v", err)
+		return nil, fmt.Errorf("failed to open duckdb: %w", err)
+	}
+
+	// Load the seatbelt_duckdb extension
+	_, err = db.ExecContext(ctx, loadSeatbeltDuckDBExtensionSQL)
+	if err != nil {
+		log.Printf("Error loading seatbelt_duckdb extension: %v", err)
+		// Continue anyway, maybe it's already loaded or built-in
+	}
+
+	// Ensure shadow table exists
+	_, err = db.ExecContext(ctx, createShadowTableSQL)
+	if err != nil {
+		log.Printf("Error creating shadow table: %v", err)
+		return nil, fmt.Errorf("failed to create shadow table: %w", err)
+	}
+
+	return db, nil
+}
+
+// createDataViews creates temporary views for source, target, and incremental scans
+func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, initialLoad bool) error {
+	// For initial load, we only create source_extract and target views
+	if initialLoad {
+		if data_files.SourceExtractScan == nil || data_files.TargetScan == nil {
+			return fmt.Errorf("source extract scan and target scan are required for initial load")
+		}
+
+		createSourceExtractViewQuery := fmt.Sprintf(createSourceExtractViewSQLTemplate, data_files.SourceExtractScan.File.Name())
+
+		createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, data_files.TargetScan.File.Name())
+
+		for _, query := range []string{createSourceExtractViewQuery, createTargetViewQuery} {
+			_, err := db.ExecContext(ctx, query)
+			if err != nil {
+				log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
+				return fmt.Errorf("failed to create view: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// Regular incremental update - create all three views
+	if data_files.SourceScan == nil || data_files.TargetScan == nil || data_files.SourceChanges == nil {
+		return fmt.Errorf("source scan, target scan, and source changes are required for incremental update")
+	}
+
+	// Create VIEWs for the source, target, and incremental scans
+	createSourceViewQuery := fmt.Sprintf(createSourceViewSQLTemplate, data_files.SourceScan.File.Name())
+	createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, data_files.TargetScan.File.Name())
+	createIncrementalViewQuery := fmt.Sprintf(createIncrementalViewSQLTemplate, data_files.SourceChanges.File.Name())
+	createTemporaryNewShadowTableQuery := dropAndCreateShadowNewTableSQL
+
+	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery, createTemporaryNewShadowTableQuery} {
+		_, err := db.ExecContext(ctx, query)
+		if err != nil {
+			log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
+			return fmt.Errorf("failed to create view: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ExplainAnalyzeUpdateShadow runs the shadow update query with EXPLAIN ANALYZE and returns the plan
@@ -303,7 +292,12 @@ func ExplainAnalyzeUpdateShadow(ctx context.Context, cfg *Config, data_files *Da
 	}
 
 	// Get the upsert query and prepend EXPLAIN ANALYZE
-	upsertQuery := getUpsertQuery(cfg.InitialLoad)
+	var upsertQuery string
+	if cfg.InitialLoad {
+		upsertQuery = initialLoadUpsertSQL
+	} else {
+		upsertQuery = incrementalUpdateUpsertSQL
+	}
 	explainQuery := fmt.Sprintf("EXPLAIN ANALYZE %s", upsertQuery)
 
 	// Run the EXPLAIN ANALYZE query
@@ -359,7 +353,12 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}()
 
 	// Execute the upsert query within the transaction
-	upsertQuery := getUpsertQuery(cfg.InitialLoad)
+	var upsertQuery string
+	if cfg.InitialLoad {
+		upsertQuery = initialLoadUpsertSQL
+	} else {
+		upsertQuery = incrementalUpdateUpsertSQL
+	}
 	upsertStart := time.Now()
 	_, err = tx.ExecContext(ctx, upsertQuery)
 	log.Printf("Upsert query completed in %v", time.Since(upsertStart))
@@ -370,17 +369,17 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 
 	if !cfg.InitialLoad {
 		// Swap the new shadow table with the old shadow table within the transaction
-		_, err = tx.ExecContext(ctx, "ALTER TABLE shadow RENAME TO shadow_old;")
+		_, err = tx.ExecContext(ctx, alterTableRenameShadowToShadowOldSQL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to rename shadow table: %w", err)
 		}
 
-		_, err = tx.ExecContext(ctx, "ALTER TABLE shadow_new RENAME TO shadow;")
+		_, err = tx.ExecContext(ctx, alterTableRenameShadowNewToShadowSQL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to rename shadow table: %w", err)
 		}
 
-		_, err = tx.ExecContext(ctx, "DROP TABLE shadow_old;")
+		_, err = tx.ExecContext(ctx, dropTableShadowOldSQL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to drop shadow_old table: %w", err)
 		}
@@ -393,13 +392,13 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 
 	// Logic to calculate validation_status inline
-	validationStatusLogic := getValidationStatusLogic()
+	validationStatusLogic := fmt.Sprintf(validationStatusCaseStmtSQL,
+		StatusValid, StatusPending, StatusGone, StatusError, // 1, 2, 3, 4
+		OpNoop, OpDoesNotExist, OpDelete, // 5, 6, 7
+	)
 
 	// Delete GONE rows
-	deleteQuery := fmt.Sprintf(`
-        DELETE FROM shadow
-        WHERE (%s) = %[2]d -- StatusGone
-    `, validationStatusLogic, StatusGone)
+	deleteQuery := fmt.Sprintf(deleteGoneRowsSQLTemplate, validationStatusLogic, StatusGone)
 
 	deleteStart := time.Now()
 	_, err = db.ExecContext(ctx, deleteQuery)
@@ -410,7 +409,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 
 	// Calculate metrics
-	metricsQuery := getMetricsQuery(validationStatusLogic)
+	metricsQuery := fmt.Sprintf(metricsQuerySQLTemplate, validationStatusLogic, StatusPending, StatusValid)
 
 	metricsStart := time.Now()
 	metrics := &ValidationMetrics{}
