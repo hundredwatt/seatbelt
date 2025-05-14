@@ -27,6 +27,11 @@ build: ensure-build-dir
 	git_hash=$$(git rev-parse --short HEAD) && \
 	go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt ./cmd/seatbelt
 
+build-archive: build
+	git_hash=$$(git rev-parse --short HEAD) && \
+	build_hash=$$(md5sum build/seatbelt | cut -d' ' -f1 | head -c 12) && \
+	cp build/seatbelt "build/seatbelt-archive-$$git_hash-$$build_hash"
+
 build-intel: ensure-build-dir
 	git_hash=$$(git rev-parse --short HEAD) && \
 	GOOS=darwin GOARCH=amd64 go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt-intel ./cmd/seatbelt
