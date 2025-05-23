@@ -14,6 +14,7 @@ type Source interface {
 
 type ChangeStreamConsumer interface {
 	ConsumeToCompletion() (*DataFile, error)
+	Close() error
 }
 
 type Target interface {

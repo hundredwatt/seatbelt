@@ -271,6 +271,24 @@ func (c *TestingChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile,
 	return c.OutputFile, nil
 }
 
+func (c *TestingChangeStreamConsumer) Close() error {
+	// Cancel the context to stop the goroutine
+	if c.Context.Done() != nil {
+		// Context is already done, or we don't have a cancel function
+		// Just wait for completion
+	}
+
+	// Wait for the processing goroutine to finish
+	c.WaitGroup.Wait()
+
+	// Close the output file if it exists
+	if c.OutputFile != nil {
+		return c.OutputFile.Close()
+	}
+
+	return nil
+}
+
 type TestingTarget struct {
 	Data []map[string]interface{}
 }
