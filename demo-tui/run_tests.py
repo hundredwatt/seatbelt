@@ -12,7 +12,7 @@ from tests.test_config import run_tests
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Run Seatbelt Demo tests')
-    parser.add_argument('paths', nargs='*', default=['tests'], 
+    parser.add_argument('paths', nargs='*', default=['tests'],
                         help='Paths to test files or directories')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose output')
@@ -25,14 +25,14 @@ if __name__ == "__main__":
     parser.add_argument('--reraise', action='store_true',
                         help='Re-raise exceptions to show the full traceback for debugging')
     args = parser.parse_args()
-    
+
     # Determine color setting
     use_color = None  # None means auto-detect
     if args.no_color:
         use_color = False
     elif args.force_color:
         use_color = True
-    
+
     # Run tests
     success = run_tests(args.paths, args.verbose, use_color=use_color, print_db=args.print_db, reraise=args.reraise)
-    sys.exit(0 if success else 1) 
+    sys.exit(0 if success else 1)
