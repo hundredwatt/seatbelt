@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Any, Optional, Set
 from .transformations import Transformations
 from .config import TRACING_IDS
+from .column_types import ColumnType
 
 class ETLProcessor:
     """Class responsible for ETL (Extract-Transform-Load) operations"""
@@ -116,11 +117,21 @@ class ETLProcessor:
 
                     # NULL corruption logic
                     if corruptor.corrupt_nulls and source_value is None and col_name in self.null_corruptible_columns:
-                        target_row[col_name] = database._generate_default_value(
-                            column.target_type if column.target_type else column.type
-                        )
+                        # Use specific corruption values instead of random generation
+                        target_type = column.target_type if column.target_type else column.type
+                        if target_type in [ColumnType.FLOAT, ColumnType.FLOAT32, ColumnType.DECIMAL]:
+                            target_row[col_name] = 0.0
+                        elif target_type in [ColumnType.INTEGER, ColumnType.INTEGER32]:
+                            target_row[col_name] = 0
+                        elif target_type == ColumnType.STRING:
+                            target_row[col_name] = ""
+                        elif target_type == ColumnType.BOOLEAN:
+                            target_row[col_name] = False
+                        else:
+                            # For other types, use the original behavior
+                            target_row[col_name] = database._generate_default_value(target_type)
                         null_corrupted_count += 1
-                        logging.debug(f"NULL CORRUPTED: id={row_id}, column={col_name} (NULL Mismap)")
+                        logging.debug(f"NULL CORRUPTED: id={row_id}, column={col_name} -> {target_row[col_name]} (NULL Mismap)")
                     else:
                         target_row[col_name] = self.transform_for_target(source_value, column)
 
