@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -86,7 +86,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		safeFullTableName)
 
 	// Execute the COPY command and stream results to the file
-	log.Println("postgres scan query", copyQuery)
+	slog.Info("postgres scan query", slog.String("query", copyQuery))
 	bufferedWriter := bufio.NewWriter(osfile)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, copyQuery)
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 	}
 	query := fmt.Sprintf("SELECT %s, %s FROM %s", table.PrimaryKey(), strings.Join(source_column_names, ","), table.Name())
 
-	log.Println("postgres extract scan query", query)
+	slog.Info("postgres extract scan query", slog.String("query", query))
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -267,7 +267,7 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 	defer conn.Release()
 
 	// Execute the COPY command and stream results to the file
-	log.Println("postgres inspect scan query", query)
+	slog.Info("postgres inspect scan query", slog.String("query", query))
 	bufferedWriter := bufio.NewWriter(osfile)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, query)
 	if err != nil {
@@ -320,7 +320,7 @@ func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.
 		table.PrimaryKey(),
 		pksList)
 
-	log.Println("postgres inspect extract scan query", query)
+	slog.Info("postgres inspect extract scan query", slog.String("query", query))
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err

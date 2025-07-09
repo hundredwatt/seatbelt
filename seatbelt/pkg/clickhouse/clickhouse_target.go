@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -62,7 +62,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.TargetName())
 
 	// Execute the query
-	log.Println("clickhouse scan query", query)
+	slog.Info("clickhouse scan query", slog.String("query", query))
 	rows, err := t.conn.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query on clickhouse: %w", err)
@@ -137,7 +137,7 @@ func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table
 		WHERE %s IN (%s)
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.SQLTextExpressionForTargetHashing(), table.TargetName(), table.PrimaryKey(), pksList)
 
-	log.Println("clickhouse inspect scan query", query)
+	slog.Info("clickhouse inspect scan query", slog.String("query", query))
 	rows, err := t.conn.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query on clickhouse: %w", err)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log" // Added for logging errors
+	"log/slog"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2" // Import the v2 DuckDB driver
@@ -16,8 +16,6 @@ const (
 	Threads                 = 4
 	MemoryLimit             = "8gb"
 )
-
-
 
 // ValidationMetrics holds the results of the validation check.
 type ValidationMetrics struct {
@@ -48,7 +46,7 @@ const (
 )
 
 // SQL Queries
-const(
+const (
 	loadSeatbeltDuckDBExtensionSQL = `LOAD seatbelt_duckdb;`
 	createShadowTableSQL           = `
         CREATE TABLE IF NOT EXISTS shadow (
@@ -231,21 +229,21 @@ func setupDuckDB(ctx context.Context, shadowPath string) (*sql.DB, error) {
 	// Connect to DuckDB, allowing unsigned extensions
 	db, err := sql.Open("duckdb", fmt.Sprintf("%s?allow_unsigned_extensions=%t&threads=%d&memory_limit=%s", shadowPath, AllowUnsignedExtensions, Threads, MemoryLimit))
 	if err != nil {
-		log.Printf("Error opening DuckDB: %v", err)
+		slog.Error("Error opening DuckDB", "error", err)
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
 
 	// Load the seatbelt_duckdb extension
 	_, err = db.ExecContext(ctx, loadSeatbeltDuckDBExtensionSQL)
 	if err != nil {
-		log.Printf("Error loading seatbelt_duckdb extension: %v", err)
+		slog.Error("Error loading seatbelt_duckdb extension", "error", err)
 		// Continue anyway, maybe it's already loaded or built-in
 	}
 
 	// Ensure shadow table exists
 	_, err = db.ExecContext(ctx, createShadowTableSQL)
 	if err != nil {
-		log.Printf("Error creating shadow table: %v", err)
+		slog.Error("Error creating shadow table", "error", err)
 		return nil, fmt.Errorf("failed to create shadow table: %w", err)
 	}
 
@@ -267,7 +265,7 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, i
 		for _, query := range []string{createSourceExtractViewQuery, createTargetViewQuery} {
 			_, err := db.ExecContext(ctx, query)
 			if err != nil {
-				log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
+				slog.Error("Error creating view", "error", err, "query", query)
 				return fmt.Errorf("failed to create view: %w", err)
 			}
 		}
@@ -288,7 +286,7 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, i
 	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery, createTemporaryNewShadowTableQuery} {
 		_, err := db.ExecContext(ctx, query)
 		if err != nil {
-			log.Printf("Error creating view: %v\nQuery:\n%s", err, query)
+			slog.Error("Error creating view", "error", err, "query", query)
 			return fmt.Errorf("failed to create view: %w", err)
 		}
 	}
@@ -323,7 +321,7 @@ func ExplainAnalyzeUpdateShadow(ctx context.Context, cfg *Config, data_files *Da
 	// Run the EXPLAIN ANALYZE query
 	rows, err := db.QueryContext(ctx, explainQuery)
 	if err != nil {
-		log.Printf("Error executing EXPLAIN ANALYZE query: %v\nQuery:\n%s", err, explainQuery)
+		slog.Error("Error executing EXPLAIN ANALYZE query", "error", err, "query", explainQuery)
 		return "", fmt.Errorf("failed to execute EXPLAIN ANALYZE query: %w", err)
 	}
 	defer rows.Close()
@@ -381,9 +379,9 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 	upsertStart := time.Now()
 	_, err = tx.ExecContext(ctx, upsertQuery)
-	log.Printf("Upsert query completed in %v", time.Since(upsertStart))
+	slog.Info("Upsert query completed", "duration", time.Since(upsertStart))
 	if err != nil {
-		log.Printf("Error executing UPSERT query: %v\nQuery:\n%s", err, upsertQuery)
+		slog.Error("Error executing UPSERT query", "error", err, "query", upsertQuery)
 		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
 	}
 
@@ -422,9 +420,9 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 
 	deleteStart := time.Now()
 	_, err = db.ExecContext(ctx, deleteQuery)
-	log.Printf("Delete query completed in %v", time.Since(deleteStart))
+	slog.Info("Delete query completed", "duration", time.Since(deleteStart))
 	if err != nil {
-		log.Printf("Error deleting GONE rows: %v\nQuery:\n%s", err, deleteQuery)
+		slog.Error("Error deleting GONE rows", "error", err, "query", deleteQuery)
 		return nil, fmt.Errorf("failed to delete gone rows: %w", err)
 	}
 
@@ -442,9 +440,9 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 		&metrics.PendingCount,
 		&metrics.ValidCount,
 	)
-	log.Printf("Metrics query completed in %v", time.Since(metricsStart))
+	slog.Info("Metrics query completed", "duration", time.Since(metricsStart))
 	if err != nil {
-		log.Printf("Error scanning metrics: %v\nQuery:\n%s", err, metricsQuery)
+		slog.Error("Error scanning metrics", "error", err, "query", metricsQuery)
 		return nil, fmt.Errorf("failed to scan metrics: %w", err)
 	}
 
