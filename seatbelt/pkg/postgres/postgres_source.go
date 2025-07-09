@@ -3,6 +3,7 @@ package postgres
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +23,25 @@ type PostgresSource struct {
 
 func NewPostgresSource(conn *pgxpool.Pool) *PostgresSource {
 	return &PostgresSource{conn: conn}
+}
+
+func (s *PostgresSource) DataSize(ctx context.Context, table seatbelt.Table) (int64, error) {
+	var totalBytes sql.NullInt64
+	query := `SELECT pg_table_size($1)`
+	err := s.conn.QueryRow(ctx, query, table.Name()).Scan(&totalBytes)
+	if err != nil {
+		// This also handles pgx.ErrNoRows, though it's not expected for this query.
+		return 0, fmt.Errorf("failed to get table size for %s: %w", table.Name(), err)
+	}
+
+	if !totalBytes.Valid {
+		// This can happen if the table does not exist.
+		return 0, fmt.Errorf("table %s not found or size is null", table.Name())
+	}
+
+	slog.Debug("Got postgres table data size", "table", table.Name(), "size_bytes", totalBytes.Int64)
+
+	return totalBytes.Int64, nil
 }
 
 func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
@@ -86,7 +106,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		safeFullTableName)
 
 	// Execute the COPY command and stream results to the file
-	slog.Info("postgres scan query", slog.String("query", copyQuery))
+	slog.Debug("postgres scan query", slog.String("query", copyQuery))
 	bufferedWriter := bufio.NewWriter(osfile)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, copyQuery)
 	if err != nil {
@@ -128,7 +148,7 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 	}
 	query := fmt.Sprintf("SELECT %s, %s FROM %s", table.PrimaryKey(), strings.Join(source_column_names, ","), table.Name())
 
-	slog.Info("postgres extract scan query", slog.String("query", query))
+	slog.Debug("postgres extract scan query", slog.String("query", query))
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -267,7 +287,7 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 	defer conn.Release()
 
 	// Execute the COPY command and stream results to the file
-	slog.Info("postgres inspect scan query", slog.String("query", query))
+	slog.Debug("postgres inspect scan query", slog.String("query", query))
 	bufferedWriter := bufio.NewWriter(osfile)
 	commandTag, err := conn.Conn().PgConn().CopyTo(ctx, bufferedWriter, query)
 	if err != nil {
@@ -320,7 +340,7 @@ func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.
 		table.PrimaryKey(),
 		pksList)
 
-	slog.Info("postgres inspect extract scan query", slog.String("query", query))
+	slog.Debug("postgres inspect extract scan query", slog.String("query", query))
 	rows, err := s.conn.Query(ctx, query)
 	if err != nil {
 		return nil, err

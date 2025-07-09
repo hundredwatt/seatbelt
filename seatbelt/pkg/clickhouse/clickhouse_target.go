@@ -26,6 +26,43 @@ func NewClickHouseTarget(conn *sql.DB) *ClickHouseTarget {
 	return &ClickHouseTarget{conn: conn}
 }
 
+func (t *ClickHouseTarget) DataSize(ctx context.Context, table seatbelt.Table) (int64, error) {
+	targetName := table.TargetName()
+	parts := strings.SplitN(targetName, ".", 2)
+	var database, tableName string
+	if len(parts) == 2 {
+		database = parts[0]
+		tableName = parts[1]
+	} else {
+		// If no database is specified, query for the current one.
+		err := t.conn.QueryRowContext(ctx, "SELECT currentDatabase()").Scan(&database)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get current database: %w", err)
+		}
+		tableName = targetName
+	}
+
+	var totalBytes sql.NullInt64
+	query := `SELECT total_bytes FROM system.tables WHERE database = ? AND name = ?`
+	err := t.conn.QueryRowContext(ctx, query, database, tableName).Scan(&totalBytes)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("table %s not found in system.tables", targetName)
+		}
+		return 0, fmt.Errorf("failed to get table size for %s: %w", targetName, err)
+	}
+
+	if !totalBytes.Valid {
+		// This might be redundant if total_bytes is never null for an existing table,
+		// but it's safe to keep. If a table exists, it should have a size (even 0).
+		return 0, fmt.Errorf("table size is null for %s", targetName)
+	}
+
+	slog.Debug("Got clickhouse table data size", "table", targetName, "size_bytes", totalBytes.Int64)
+
+	return totalBytes.Int64, nil
+}
+
 // Scan retrieves rows from ClickHouse and computes hashes for comparison
 func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*seatbelt.DataFile, error) {
 	// Get temp directory from environment variable or use default
@@ -62,7 +99,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.TargetName())
 
 	// Execute the query
-	slog.Info("clickhouse scan query", slog.String("query", query))
+	slog.Debug("clickhouse scan query", slog.String("query", query))
 	rows, err := t.conn.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query on clickhouse: %w", err)
@@ -137,7 +174,7 @@ func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table
 		WHERE %s IN (%s)
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.SQLTextExpressionForTargetHashing(), table.TargetName(), table.PrimaryKey(), pksList)
 
-	slog.Info("clickhouse inspect scan query", slog.String("query", query))
+	slog.Debug("clickhouse inspect scan query", slog.String("query", query))
 	rows, err := t.conn.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query on clickhouse: %w", err)

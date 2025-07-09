@@ -64,7 +64,7 @@ var rootCmd = &cobra.Command{
 	Long:  `Seatbelt helps ensure data consistency by comparing data between a source and a target system using cryptographic hashes and maintaining a shadow table.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// You can add global setup here if needed
-		slog.SetLogLoggerLevel(slog.LevelWarn)
+		slog.SetLogLoggerLevel(slog.LevelInfo)
 		fmt.Fprintf(os.Stderr, "Seatbelt %s\n", version)
 	},
 }
@@ -109,29 +109,29 @@ var runCmd = &cobra.Command{
 		}
 		slog.Info("Data fetched successfully.")
 		if !initialLoad {
-			slog.Info("  Source Scan", "file", dataFiles.SourceScan.Name(), "rows", dataFiles.SourceScan.RowCount())
+			fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%.2f rows/s, %.2f MB/s)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds(), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024)
 		}
-		slog.Info("  Target Scan", "file", dataFiles.TargetScan.Name(), "rows", dataFiles.TargetScan.RowCount())
+		fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%.2f rows/s, %.2f MB/s)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds(), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024)
 		if !initialLoad && dataFiles.SourceChanges != nil {
-			slog.Info("  Source Changes", "file", dataFiles.SourceChanges.Name(), "rows", dataFiles.SourceChanges.RowCount())
+			slog.Debug("  Source Changes", "file", dataFiles.SourceChanges.Name(), "rows", dataFiles.SourceChanges.RowCount())
 		}
 		if dataFiles.SourceExtractScan != nil {
-			slog.Info("  Source Extract Scan", "file", dataFiles.SourceExtractScan.Name(), "rows", dataFiles.SourceExtractScan.RowCount())
+			fmt.Fprintf(os.Stderr, "Source extract scan completed in %s, %d rows (%.2f rows/s, %.2f MB/s)\n", dataFiles.SourceExtractScan.GenerationTime, dataFiles.SourceExtractScan.RowCount(), float64(dataFiles.SourceExtractScan.RowCount())/dataFiles.SourceExtractScan.GenerationTime.Seconds(), float64(dataFiles.SourceExtractScan.SourceDataSize)/dataFiles.SourceExtractScan.GenerationTime.Seconds()/1024/1024)
 		}
 
 		if fetchDataOnly {
-			slog.Info("Fetch data only mode enabled. Skipping shadow update.")
+			slog.Debug("Fetch data only mode enabled. Skipping shadow update.")
 			return // Exit early as requested
 		}
 
 		// 3. Update Shadow
-		slog.Info("Updating shadow table...")
+		slog.Debug("Updating shadow table...")
 		metrics, err := seatbelt.UpdateShadow(ctx, seatbeltCfg, dataFiles)
 		if err != nil {
 			slog.Error("Error updating shadow table", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("Shadow table updated successfully.")
+		slog.Debug("Shadow table updated successfully.")
 
 		// 4. Print Validation Metrics
 		printMetrics(metrics)
@@ -222,28 +222,28 @@ var shadowCmd = &cobra.Command{
 
 		// Handle EXPLAIN ANALYZE
 		if explainAnalyze {
-			slog.Info("EXPLAIN ANALYZE shadow update requested...")
+			slog.Debug("EXPLAIN ANALYZE shadow update requested...")
 			// Pass seatbeltCfg directly, which now contains InitialLoad
 			plan, err := seatbelt.ExplainAnalyzeUpdateShadow(ctx, seatbeltCfg, dataFiles)
 			if err != nil {
 				slog.Error("Error running EXPLAIN ANALYZE", "error", err)
 				os.Exit(1)
 			}
-			slog.Info("--- EXPLAIN ANALYZE Result ---")
-			slog.Info(plan)
-			slog.Info("-----------------------------")
+			slog.Debug("--- EXPLAIN ANALYZE Result ---")
+			slog.Debug(plan)
+			slog.Debug("-----------------------------")
 			return
 		}
 
 		// Run UpdateShadow
-		slog.Info("Updating shadow table from files...")
+		slog.Debug("Updating shadow table from files...")
 		// Pass seatbeltCfg directly, which now contains InitialLoad
 		metrics, err := seatbelt.UpdateShadow(ctx, seatbeltCfg, dataFiles)
 		if err != nil {
 			slog.Error("Error updating shadow table from files", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("Shadow table updated successfully.")
+		slog.Debug("Shadow table updated successfully.")
 
 		// Print Validation Metrics
 		printMetrics(metrics)
@@ -304,7 +304,7 @@ var benchSourceScanCmd = &cobra.Command{
 		}
 
 		// Run only source scan
-		slog.Info("Running source scan benchmark...")
+		slog.Debug("Running source scan benchmark...")
 		startTime := time.Now()
 		sourceScan, err := source.Scan(ctx, table)
 		duration := time.Since(startTime)
@@ -314,7 +314,7 @@ var benchSourceScanCmd = &cobra.Command{
 		}
 
 		// Print results
-		slog.Info("Source scan completed", "duration", duration, "file", sourceScan.Name(), "rows", sourceScan.RowCount())
+		slog.Debug("Source scan completed", "duration", duration, "file", sourceScan.Name(), "rows", sourceScan.RowCount())
 	},
 }
 
@@ -365,7 +365,7 @@ var benchSourceExtractScanCmd = &cobra.Command{
 		}
 
 		// Run only source extract scan
-		slog.Info("Running source extract scan benchmark...")
+		slog.Debug("Running source extract scan benchmark...")
 		startTime := time.Now()
 		sourceExtractScan, err := source.ExtractScan(ctx, table)
 		duration := time.Since(startTime)
@@ -375,7 +375,7 @@ var benchSourceExtractScanCmd = &cobra.Command{
 		}
 
 		// Print results
-		slog.Info("Source extract scan completed", "duration", duration, "file", sourceExtractScan.Name(), "rows", sourceExtractScan.RowCount())
+		slog.Debug("Source extract scan completed", "duration", duration, "file", sourceExtractScan.Name(), "rows", sourceExtractScan.RowCount())
 	},
 }
 
@@ -426,7 +426,7 @@ var benchTargetScanCmd = &cobra.Command{
 		}
 
 		// Run only target scan
-		slog.Info("Running target scan benchmark...")
+		slog.Debug("Running target scan benchmark...")
 		startTime := time.Now()
 		targetScan, err := target.Scan(ctx, table)
 		duration := time.Since(startTime)
@@ -436,7 +436,7 @@ var benchTargetScanCmd = &cobra.Command{
 		}
 
 		// Print results
-		slog.Info("Target scan completed", "duration", duration, "file", targetScan.Name(), "rows", targetScan.RowCount())
+		slog.Debug("Target scan completed", "duration", duration, "file", targetScan.Name(), "rows", targetScan.RowCount())
 	},
 }
 
@@ -525,7 +525,7 @@ var inspectCmd = &cobra.Command{
 				RowMapperAndHasher: rowMapper,
 			}
 
-			slog.Info("Using filtered columns", "columns", columnNames)
+			slog.Debug("Using filtered columns", "columns", columnNames)
 		}
 
 		// Cast source and target to their inspector interfaces
@@ -542,36 +542,36 @@ var inspectCmd = &cobra.Command{
 		}
 
 		// Run all inspect methods
-		slog.Info("Running source inspect scan...")
+		slog.Debug("Running source inspect scan...")
 		sourceScan, err := sourceInspector.InspectScan(ctx, table, primaryKeys)
 		if err != nil {
 			slog.Error("Error running source inspect scan", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("Source inspect scan completed", "file", sourceScan.Name(), "rows", sourceScan.RowCount())
+		slog.Debug("Source inspect scan completed", "file", sourceScan.Name(), "rows", sourceScan.RowCount())
 
-		slog.Info("Running source inspect extract scan...")
+		slog.Debug("Running source inspect extract scan...")
 		sourceExtractScan, err := sourceInspector.InspectExtractScan(ctx, table, primaryKeys)
 		if err != nil {
 			slog.Error("Error running source inspect extract scan", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("Source inspect extract scan completed", "file", sourceExtractScan.Name(), "rows", sourceExtractScan.RowCount())
+		slog.Debug("Source inspect extract scan completed", "file", sourceExtractScan.Name(), "rows", sourceExtractScan.RowCount())
 
-		slog.Info("Running target inspect scan...")
+		slog.Debug("Running target inspect scan...")
 		targetScan, err := targetInspector.InspectScan(ctx, table, primaryKeys)
 		if err != nil {
 			slog.Error("Error running target inspect scan", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("Target inspect scan completed", "file", targetScan.Name(), "rows", targetScan.RowCount())
+		slog.Debug("Target inspect scan completed", "file", targetScan.Name(), "rows", targetScan.RowCount())
 
-		slog.Info("\nInspect Results:")
-		slog.Info("----------------------------")
-		slog.Info("Source inspect scan file", "file", sourceScan.Name())
-		slog.Info("Source inspect extract scan file", "file", sourceExtractScan.Name())
-		slog.Info("Target inspect scan file", "file", targetScan.Name())
-		slog.Info("----------------------------")
+		slog.Debug("\nInspect Results:")
+		slog.Debug("----------------------------")
+		slog.Debug("Source inspect scan file", "file", sourceScan.Name())
+		slog.Debug("Source inspect extract scan file", "file", sourceExtractScan.Name())
+		slog.Debug("Target inspect scan file", "file", targetScan.Name())
+		slog.Debug("----------------------------")
 	},
 }
 
@@ -592,10 +592,10 @@ func loadConfig(path string) (*AppConfig, error) {
 		for key, value := range config.Environment {
 			currentValue := os.Getenv(key)
 			if currentValue == "" {
-				slog.Info("Setting environment variable", "key", key, "value", value)
+				slog.Debug("Setting environment variable", "key", key, "value", value)
 				os.Setenv(key, value)
 			} else {
-				slog.Info("Not overriding existing environment variable", "key", key, "current_value", currentValue)
+				slog.Debug("Not overriding existing environment variable", "key", key, "current_value", currentValue)
 			}
 		}
 	}
@@ -620,7 +620,7 @@ func loadConfig(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("primary_key_name is required")
 	}
 
-	slog.Info("Loaded config", "config", config)
+	slog.Debug("Loaded config", "config", config)
 
 	return &config, nil
 }
@@ -710,7 +710,7 @@ func createSource(ctx context.Context, cfg *AppConfig) (seatbelt.Source, func(),
 	}
 	source := postgres.NewPostgresSource(pgPool)
 	sourceCleanup := func() { pgPool.Close() }
-	slog.Info("PostgreSQL source connection established.")
+	slog.Debug("PostgreSQL source connection established.")
 
 	return source, sourceCleanup, nil
 }
@@ -728,26 +728,59 @@ func createTarget(ctx context.Context, cfg *AppConfig) (seatbelt.Target, func(),
 	}
 	target := clickhouse.NewClickHouseTarget(chDB)
 	targetCleanup := func() { chDB.Close() }
-	slog.Info("ClickHouse target connection established.")
+	slog.Debug("ClickHouse target connection established.")
 
 	return target, targetCleanup, nil
+}
+
+func humanize(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	sign := ""
+	if n < 0 {
+		sign = "-"
+		n = -n
+	}
+
+	s := fmt.Sprintf("%d", n)
+	le := len(s)
+	if le <= 3 {
+		return sign + s
+	}
+
+	res := make([]byte, le+((le-1)/3))
+	i := le - 1
+	j := len(res) - 1
+	for i >= 0 {
+		res[j] = s[i]
+		if i > 0 && (le-i)%3 == 0 {
+			j--
+			res[j] = ','
+		}
+		i--
+		j--
+	}
+	return sign + string(res)
 }
 
 // printMetrics formats and prints the validation metrics
 func printMetrics(metrics *seatbelt.ValidationMetrics) {
 	fmt.Println("--- Validation Metrics ---")
-	fmt.Println("Source Size", "count", metrics.SourceSize)
-	fmt.Println("Target Size", "count", metrics.TargetSize)
-	fmt.Println("Seatbelt Size", "count", metrics.SeatbeltSize)
-	fmt.Println("Valid Rows", "count", metrics.ValidCount)
-	fmt.Println("Pending Rows", "count", metrics.PendingCount)
-	fmt.Println("Error Rows", "count", metrics.ErrorCount)
-	fmt.Println("--------------------------")
+	fmt.Printf("%-18s %25s\n", "Metric", "Count")
+	fmt.Println("---------------------------------------------")
+	fmt.Printf("%-18s %25s\n", "Source Row Count", humanize(metrics.SourceSize))
+	fmt.Printf("%-18s %25s\n", "Target Row Count", humanize(metrics.TargetSize))
+	fmt.Printf("%-18s %25s\n", "Valid Rows", humanize(metrics.ValidCount))
+	fmt.Printf("%-18s %25s\n", "Pending Rows", humanize(metrics.PendingCount))
+	fmt.Printf("%-18s %25s\n", "Error Rows", humanize(metrics.ErrorCount))
+	fmt.Println("---------------------------------------------")
 }
 
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "Path to the configuration file")
+	rootCmd.PersistentFlags().StringVarP(&configFile, "file", "f", "config.yaml", "Path to the configuration file (alias for --config)")
 
 	// Flags for 'run' command (also used by 'fetch')
 	runCmd.Flags().BoolVar(&fetchDataOnly, "fetch-only", false, "Only fetch data, do not update the shadow table")

@@ -45,7 +45,7 @@ func FetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 }
 
 func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
-	sg, ctx := errgroup.WithContext(ctx)
+	sg, errgroupCtx := errgroup.WithContext(ctx)
 
 	var consumer ChangeStreamConsumer
 	var target_scan *DataFile
@@ -63,17 +63,29 @@ func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 
 	sg.Go(func() error {
 		var err error
+		targetDataSize, err := cfg.Target.DataSize(errgroupCtx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		targetScanStart := time.Now()
-		target_scan, err = cfg.Target.Scan(ctx, cfg.Table)
-		slog.Info("Target scan completed", "duration", time.Since(targetScanStart))
+		target_scan, err = cfg.Target.Scan(errgroupCtx, cfg.Table)
+		target_scan.SetGenerationTime(time.Since(targetScanStart))
+		target_scan.SetSourceDataSize(targetDataSize)
+		slog.Debug("Target scan completed", "duration", target_scan.GenerationTime)
 		return err
 	})
 
 	sg.Go(func() error {
 		var err error
+		sourceDataSize, err := cfg.Source.DataSize(errgroupCtx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		sourceScanStart := time.Now()
-		source_scan, err = cfg.Source.Scan(ctx, cfg.Table)
-		slog.Info("Source scan completed", "duration", time.Since(sourceScanStart))
+		source_scan, err = cfg.Source.Scan(errgroupCtx, cfg.Table)
+		source_scan.SetGenerationTime(time.Since(sourceScanStart))
+		source_scan.SetSourceDataSize(sourceDataSize)
+		slog.Debug("Source scan completed", "duration", source_scan.GenerationTime)
 		return err
 	})
 
@@ -83,7 +95,8 @@ func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 
 	consumeStart := time.Now()
 	source_changes, err := consumer.ConsumeToCompletion()
-	slog.Info("Consumer ConsumeToCompletion completed", "duration", time.Since(consumeStart))
+	source_changes.SetGenerationTime(time.Since(consumeStart))
+	slog.Debug("Consumer ConsumeToCompletion completed", "duration", source_changes.GenerationTime)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +121,7 @@ func initialLoad(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 		targetScanStart := time.Now()
 		var err error
 		target_scan, err = cfg.Target.Scan(ctx, cfg.Table)
-		slog.Info("Target scan completed", "duration", time.Since(targetScanStart))
+		slog.Debug("Target scan completed", "duration", time.Since(targetScanStart))
 		return err
 	})
 
@@ -116,7 +129,7 @@ func initialLoad(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 		sourceExtractScanStart := time.Now()
 		var err error
 		source_extract_scan, err = cfg.Source.ExtractScan(ctx, cfg.Table)
-		slog.Info("Source extract scan completed", "duration", time.Since(sourceExtractScanStart))
+		slog.Debug("Source extract scan completed", "duration", time.Since(sourceExtractScanStart))
 		return err
 	})
 
@@ -125,7 +138,7 @@ func initialLoad(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 			sourceScanStart := time.Now()
 			var err error
 			source_scan, err = cfg.Source.Scan(ctx, cfg.Table)
-			slog.Info("Source scan completed", "duration", time.Since(sourceScanStart))
+			slog.Debug("Source scan completed", "duration", time.Since(sourceScanStart))
 			return err
 		})
 	}

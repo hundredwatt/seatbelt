@@ -7,6 +7,7 @@ import (
 type Source interface {
 	Scan(ctx context.Context, table Table) (*DataFile, error)
 	ExtractScan(ctx context.Context, table Table) (*DataFile, error)
+	DataSize(ctx context.Context, table Table) (int64, error)
 
 	// TODO - needs to support multiple tables
 	StartChangeStreamConsumer(ctx context.Context, table Table) (ChangeStreamConsumer, error)
@@ -19,6 +20,7 @@ type ChangeStreamConsumer interface {
 
 type Target interface {
 	Scan(ctx context.Context, table Table) (*DataFile, error)
+	DataSize(ctx context.Context, table Table) (int64, error)
 }
 
 // Inspector interface

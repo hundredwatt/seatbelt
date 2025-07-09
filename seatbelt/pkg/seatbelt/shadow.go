@@ -379,7 +379,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 	}
 	upsertStart := time.Now()
 	_, err = tx.ExecContext(ctx, upsertQuery)
-	slog.Info("Upsert query completed", "duration", time.Since(upsertStart))
+	slog.Debug("Upsert query completed", "duration", time.Since(upsertStart))
 	if err != nil {
 		slog.Error("Error executing UPSERT query", "error", err, "query", upsertQuery)
 		return nil, fmt.Errorf("failed to execute upsert query: %w", err)
@@ -420,7 +420,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 
 	deleteStart := time.Now()
 	_, err = db.ExecContext(ctx, deleteQuery)
-	slog.Info("Delete query completed", "duration", time.Since(deleteStart))
+	slog.Debug("Delete query completed", "duration", time.Since(deleteStart))
 	if err != nil {
 		slog.Error("Error deleting GONE rows", "error", err, "query", deleteQuery)
 		return nil, fmt.Errorf("failed to delete gone rows: %w", err)
@@ -440,7 +440,7 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 		&metrics.PendingCount,
 		&metrics.ValidCount,
 	)
-	slog.Info("Metrics query completed", "duration", time.Since(metricsStart))
+	slog.Debug("Metrics query completed", "duration", time.Since(metricsStart))
 	if err != nil {
 		slog.Error("Error scanning metrics", "error", err, "query", metricsQuery)
 		return nil, fmt.Errorf("failed to scan metrics: %w", err)

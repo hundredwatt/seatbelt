@@ -77,7 +77,7 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 		consumerCancel()
 		return nil, fmt.Errorf("failed to establish standard connection: %w", err)
 	}
-	slog.Info("Established standard connection for LSN checks.")
+	slog.Debug("Established standard connection for LSN checks.")
 
 	// --- Replication Connection Setup ---
 	replConnConfig, err := pgconn.ParseConfig(connString)
@@ -96,7 +96,7 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 		consumerCancel()
 		return nil, fmt.Errorf("failed to establish replication connection: %w", err)
 	}
-	slog.Info("Established replication connection.")
+	slog.Debug("Established replication connection.")
 
 	// TODO: Get these from config
 	idleTimeout := defaultIdleTimeout
@@ -132,7 +132,7 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 	c.loopWg.Add(1)
 	go c.runReplicationLoop()
 
-	slog.Info("PostgresChangeStreamConsumer created for table and started processing", "table", table.Name())
+	slog.Debug("PostgresChangeStreamConsumer created for table and started processing", "table", table.Name())
 	return c, nil
 }
 
@@ -141,21 +141,21 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 	defer c.loopWg.Done()
 	defer func() {
-		slog.Info("Exiting replication loop.")
+		slog.Debug("Exiting replication loop.")
 		// Ensure final standby status is sent if possible, using background context
 		if c.replConn != nil {
 			c.sendStandbyStatus(c.clientXLogPos) // Use the last known position
 		}
 	}()
 
-	slog.Info("Starting replication consumer loop for table", "table", c.table.Name())
+	slog.Debug("Starting replication consumer loop for table", "table", c.table.Name())
 
 	// Split schema and table name for comparison
 	schemaName, tableName := parseSchemaTable(c.table.Name())
 	if tableName == "" { // If no schema, assume public or rely on search_path
 		tableName = schemaName
 		schemaName = "public" // Or get default schema? For now, assume public if not specified.
-		slog.Info("Assuming public schema for table", "table", tableName)
+		slog.Debug("Assuming public schema for table", "table", tableName)
 	}
 
 	pluginArgs := []string{
@@ -183,7 +183,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 		c.errorChan <- fmt.Errorf("failed to start replication stream: %w", err)
 		return // Exit goroutine
 	}
-	slog.Info("Successfully started replication stream", "slot", c.slotName, "publication", c.publicationName)
+	slog.Debug("Successfully started replication stream", "slot", c.slotName, "publication", c.publicationName)
 
 	standbyMessageTimeout := time.Second * 10
 	c.mutex.Lock()
@@ -199,7 +199,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 		// Check context cancellation first
 		select {
 		case <-c.ctx.Done():
-			slog.Info("Context cancelled, exiting replication loop", "error", c.ctx.Err())
+			slog.Debug("Context cancelled, exiting replication loop", "error", c.ctx.Err())
 			c.errorChan <- c.ctx.Err() // Report context cancellation as error
 			return                     // Exit loop
 		default:
@@ -245,7 +245,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// Check if the main context was cancelled vs the receive timeout
 				if c.ctx.Err() != nil {
-					slog.Info("Context cancelled during ReceiveMessage, exiting loop", "error", c.ctx.Err())
+					slog.Debug("Context cancelled during ReceiveMessage, exiting loop", "error", c.ctx.Err())
 					c.errorChan <- c.ctx.Err()
 					return // Exit loop
 				}
@@ -282,7 +282,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 					if err != nil {
 						slog.Error("Error parsing keepalive", "error", err)
 					} else {
-						slog.Info("Received Keepalive", "LSN", pkm.ServerWALEnd, "timestamp", pkm.ServerTime, "reply_requested", pkm.ReplyRequested)
+						slog.Debug("Received Keepalive", "LSN", pkm.ServerWALEnd, "timestamp", pkm.ServerTime, "reply_requested", pkm.ReplyRequested)
 					}
 				}
 
@@ -294,7 +294,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 				}
 
 				if c.debug {
-					slog.Info("Received XLogData", "WALStart", xld.WALStart, "ServerWALEnd", xld.ServerWALEnd, "ServerTime", xld.ServerTime)
+					slog.Debug("Received XLogData", "WALStart", xld.WALStart, "ServerWALEnd", xld.ServerWALEnd, "ServerTime", xld.ServerTime)
 				}
 
 				logicalMsg, err := pglogrepl.Parse(xld.WALData)
@@ -307,16 +307,16 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 				case *pglogrepl.RelationMessage:
 					c.relations[logicalMsg.RelationID] = logicalMsg
 					if c.debug {
-						slog.Info("Received Relation", "ID", logicalMsg.RelationID, "schema", logicalMsg.Namespace, "table", logicalMsg.RelationName, "columns", len(logicalMsg.Columns))
+						slog.Debug("Received Relation", "ID", logicalMsg.RelationID, "schema", logicalMsg.Namespace, "table", logicalMsg.RelationName, "columns", len(logicalMsg.Columns))
 					}
 
 				case *pglogrepl.BeginMessage:
 					if c.debug {
-						slog.Info("Received Begin", "LSN", logicalMsg.FinalLSN)
+						slog.Debug("Received Begin", "LSN", logicalMsg.FinalLSN)
 					}
 				case *pglogrepl.CommitMessage:
 					if c.debug {
-						slog.Info("Received Commit", "LSN", logicalMsg.CommitLSN)
+						slog.Debug("Received Commit", "LSN", logicalMsg.CommitLSN)
 					}
 
 				case *pglogrepl.InsertMessage:
@@ -327,13 +327,18 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 
 				case *pglogrepl.DeleteMessage:
 					if c.debug {
-						slog.Info("Ignoring DELETE for LSN")
+						slog.Debug("Ignoring DELETE for LSN")
+					}
+
+				case *pglogrepl.LogicalDecodingMessage:
+					if c.debug {
+						slog.Debug("Ignoring logical decoding message", "prefix", logicalMsg.Prefix)
 					}
 
 				case *pglogrepl.TruncateMessage:
 					// Handle truncate if necessary (clear results for affected tables?)
 					if c.debug {
-						slog.Info("Ignoring TRUNCATE", "relations", len(logicalMsg.RelationIDs))
+						slog.Debug("Ignoring TRUNCATE", "relations", len(logicalMsg.RelationIDs))
 					}
 
 				default:
@@ -350,7 +355,7 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 
 				// Check if completion was requested AND we've reached/passed the target LSN
 				if completionReq && target != 0 && currentPos >= target {
-					slog.Info("Reached target LSN, completing replication", "target_lsn", target.String(), "current_lsn", currentPos.String())
+					slog.Debug("Reached target LSN, completing replication", "target_lsn", target.String(), "current_lsn", currentPos.String())
 					c.mutex.Lock()
 					close(c.targetLSNReached) // Signal that the target is reached
 					// Prevent closing twice if loop continues briefly
@@ -372,7 +377,7 @@ func (c *PostgresChangeStreamConsumer) determineTargetLSN() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current LSN: %w", err)
 	}
-	// slog.Info("Current database LSN position: %s", currentLSN.String()) // Debugging
+	// slog.Debug("Current database LSN position: %s", currentLSN.String()) // Debugging
 
 	// Next, send a WAL message to force LSN increment
 	err = c.forceWalIncrement()
@@ -385,7 +390,7 @@ func (c *PostgresChangeStreamConsumer) determineTargetLSN() error {
 	if err != nil {
 		return fmt.Errorf("failed to get target LSN after WAL increment: %w", err)
 	}
-	slog.Info("Target LSN position to reach", "target_lsn", c.targetLSN.String())
+	slog.Debug("Target LSN position to reach", "target_lsn", c.targetLSN.String())
 	return nil
 }
 
@@ -422,13 +427,13 @@ func (c *PostgresChangeStreamConsumer) forceWalIncrement() error {
 		return fmt.Errorf("failed to execute pg_logical_emit_message: %w", result.Err)
 	}
 
-	slog.Info("Successfully forced WAL increment using logical decoding message")
+	slog.Debug("Successfully forced WAL increment using logical decoding message")
 	return nil
 }
 
 // ConsumeToCompletion signals the consumer to stop after reaching a determined LSN and returns the collected data.
 func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile, error) {
-	slog.Info("ConsumeToCompletion called, preparing to finalize...")
+	slog.Debug("ConsumeToCompletion called, preparing to finalize...")
 
 	// 1. Signal the loop that completion is requested
 	c.mutex.Lock()
@@ -447,7 +452,7 @@ func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile
 		_ = c.Close() // Best effort close
 		return nil, fmt.Errorf("failed to determine target LSN for completion: %w", err)
 	}
-	slog.Info("Completion requested, waiting for replication loop to reach target LSN", "target_lsn", c.targetLSN.String())
+	slog.Debug("Completion requested, waiting for replication loop to reach target LSN", "target_lsn", c.targetLSN.String())
 
 	// Set up a ticker to periodically send WAL messages to advance the LSN
 	walAdvanceTicker := time.NewTicker(1 * time.Second)
@@ -457,7 +462,7 @@ func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile
 	for {
 		select {
 		case <-c.targetLSNReached:
-			slog.Info("Replication loop confirmed target LSN reached", "target_lsn", c.targetLSN.String())
+			slog.Debug("Replication loop confirmed target LSN reached", "target_lsn", c.targetLSN.String())
 			// Proceed to final write
 			goto finalizeData
 		case err := <-c.errorChan:
@@ -470,7 +475,7 @@ func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile
 			return nil, fmt.Errorf("context cancelled during completion: %w", c.ctx.Err())
 		case <-walAdvanceTicker.C:
 			// Force WAL advancement to help reach target LSN
-			slog.Info("Sending WAL message to advance LSN toward target", "target_lsn", c.targetLSN.String())
+			slog.Debug("Sending WAL message to advance LSN toward target", "target_lsn", c.targetLSN.String())
 			if err := c.forceWalIncrement(); err != nil {
 				slog.Error("Error forcing WAL increment, will retry", "error", err)
 			}
@@ -482,7 +487,7 @@ finalizeData:
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	slog.Info("Writing final batch of results")
+	slog.Debug("Writing final batch of results")
 	if err := c.writeCurrentBatch(); err != nil {
 		// Log critical error, but try to proceed with what we have.
 		slog.Error("Failed to write final result batch", "error", err)
@@ -491,7 +496,7 @@ finalizeData:
 
 	// 5. Ensure the data file exists, even if empty
 	if c.dataFile == nil {
-		slog.Info("No data file was created (likely no rows processed). Creating empty file")
+		slog.Debug("No data file was created (likely no rows processed). Creating empty file")
 		if err := c.openDataFile(); err != nil {
 			// If we can't even create an empty file, something is wrong.
 			slog.Error("Failed to create empty data file", "error", err)
@@ -512,7 +517,7 @@ finalizeData:
 	resultFile := c.dataFile
 	c.dataFile = nil // Transfer ownership, prevent Close() from closing it.
 
-	slog.Info("ConsumeToCompletion finished successfully", "file", resultFile.Name(), "rows", resultFile.RowCount())
+	slog.Debug("ConsumeToCompletion finished successfully", "file", resultFile.Name(), "rows", resultFile.RowCount())
 	return resultFile, nil
 }
 
@@ -541,7 +546,7 @@ func (c *PostgresChangeStreamConsumer) openDataFile() error {
 	}
 
 	c.dataFile = dataFile
-	slog.Info("Opened CDC result file", "file", c.dataFile.Name())
+	slog.Debug("Opened CDC result file", "file", c.dataFile.Name())
 	return nil
 }
 
@@ -576,7 +581,7 @@ func (c *PostgresChangeStreamConsumer) writeCurrentBatch() error {
 	c.dataFile.SetRowCounter(newRowCount)                       // Set the new total count
 
 	if c.debug {
-		slog.Info("Wrote batch of rows to file", "batch_rows", batchRowCount, "file", c.dataFile.Name(), "total_rows", c.dataFile.RowCount())
+		slog.Debug("Wrote batch of rows to file", "batch_rows", batchRowCount, "file", c.dataFile.Name(), "total_rows", c.dataFile.RowCount())
 	}
 
 	return nil
@@ -592,7 +597,7 @@ func (c *PostgresChangeStreamConsumer) handleDataMessage(relationID uint32, colu
 
 	// Check if this is the table we are interested in
 	if rel.RelationName != targetTable || rel.Namespace != targetSchema {
-		// if c.debug { slog.Info("Skipping message for relation", "schema", rel.Namespace, "table", rel.RelationName) }
+		// if c.debug { slog.Debug("Skipping message for relation", "schema", rel.Namespace, "table", rel.RelationName) }
 		return
 	}
 
@@ -638,7 +643,7 @@ func (c *PostgresChangeStreamConsumer) handleDataMessage(relationID uint32, colu
 	}
 
 	if c.debug {
-		slog.Info("Processed Row", "pk", pkStr, "hash_pair", hashPair)
+		slog.Debug("Processed Row", "pk", pkStr, "hash_pair", hashPair)
 	}
 
 	// Acquire mutex before accessing shared state (results, batchCounter, dataFile)
@@ -652,7 +657,7 @@ func (c *PostgresChangeStreamConsumer) handleDataMessage(relationID uint32, colu
 	// Check if batch is full
 	if c.batchCounter >= resultBatchSize {
 		if c.debug {
-			slog.Info("Batch size reached, writing batch", "batch_size", resultBatchSize)
+			slog.Debug("Batch size reached, writing batch", "batch_size", resultBatchSize)
 		}
 		if err := c.writeCurrentBatch(); err != nil {
 			slog.Error("Failed to write result batch. Results for this batch may be lost", "error", err)
@@ -711,19 +716,19 @@ func (c *PostgresChangeStreamConsumer) sendStandbyStatus(lsn pglogrepl.LSN) {
 		}
 	} else {
 		if c.debug {
-			slog.Info("Sent StandbyStatusUpdate", "lsn", lsn.String())
+			slog.Debug("Sent StandbyStatusUpdate", "lsn", lsn.String())
 		}
 	}
 }
 
 // Close cleans up resources used by the consumer.
 func (c *PostgresChangeStreamConsumer) Close() error {
-	slog.Info("Closing PostgresChangeStreamConsumer")
+	slog.Debug("Closing PostgresChangeStreamConsumer")
 
 	// 1. Cancel the context to signal the loop and other operations
 	c.mutex.Lock()
 	if c.cancelCtx != nil {
-		slog.Info("Cancelling consumer context")
+		slog.Debug("Cancelling consumer context")
 		c.cancelCtx()
 		c.cancelCtx = nil // Prevent double cancel
 	}
@@ -732,15 +737,15 @@ func (c *PostgresChangeStreamConsumer) Close() error {
 	c.mutex.Unlock() // Unlock before waiting
 
 	// 2. Wait for the replication loop goroutine to finish
-	slog.Info("Waiting for replication loop to exit")
+	slog.Debug("Waiting for replication loop to exit")
 	c.loopWg.Wait()
-	slog.Info("Replication loop finished")
+	slog.Debug("Replication loop finished")
 
 	// 3. Close connections
 	var firstErr error
 	if c.replConn != nil {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		slog.Info("Closing replication connection")
+		slog.Debug("Closing replication connection")
 		err := c.replConn.Close(closeCtx)
 		cancel()
 		if err != nil {
@@ -749,13 +754,13 @@ func (c *PostgresChangeStreamConsumer) Close() error {
 				firstErr = fmt.Errorf("error closing replication connection: %w", err)
 			}
 		} else {
-			slog.Info("Replication connection closed")
+			slog.Debug("Replication connection closed")
 		}
 		c.replConn = nil
 	}
 	if c.stdConn != nil {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		slog.Info("Closing standard connection")
+		slog.Debug("Closing standard connection")
 		err := c.stdConn.Close(closeCtx)
 		cancel()
 		if err != nil {
@@ -764,7 +769,7 @@ func (c *PostgresChangeStreamConsumer) Close() error {
 				firstErr = fmt.Errorf("error closing standard connection: %w", err)
 			}
 		} else {
-			slog.Info("Standard connection closed")
+			slog.Debug("Standard connection closed")
 		}
 		c.stdConn = nil
 	}
@@ -773,29 +778,42 @@ func (c *PostgresChangeStreamConsumer) Close() error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()                       // Lock for the remainder of the function
 	if dataFileNeedsClose && c.dataFile != nil { // Double check dataFile hasn't become nil
-		slog.Info("Closing data file as it was not returned by ConsumeToCompletion", "file", c.dataFile.Name())
+		slog.Debug("Closing data file as it was not returned by ConsumeToCompletion", "file", c.dataFile.Name())
 		if err := c.dataFile.Close(); err != nil {
 			slog.Error("Error closing data file", "file", c.dataFile.Name(), "error", err)
 			if firstErr == nil {
 				firstErr = fmt.Errorf("error closing data file %s: %w", c.dataFile.Name(), err)
 			}
 		} else {
-			slog.Info("Data file closed", "file", c.dataFile.Name())
+			slog.Debug("Data file closed", "file", c.dataFile.Name())
 		}
 		c.dataFile = nil
 	}
 
 	// Clean up channels just in case (though loop should handle targetLSNReached)
 	if c.targetLSNReached != nil {
-		close(c.targetLSNReached) // Safe to close already closed channel
+		// Use a non-blocking select to attempt to close the channel.
+		// If it's already closed, the default case will prevent a panic.
+		select {
+		case <-c.targetLSNReached:
+			// Already closed or value sent, do nothing
+		default:
+			close(c.targetLSNReached) // Not closed, so close it
+		}
 		c.targetLSNReached = nil
 	}
 	if c.errorChan != nil {
-		close(c.errorChan)
+		// Use a non-blocking select to see if it's already closed.
+		select {
+		case <-c.errorChan:
+			// Already closed or has an error, do nothing with the channel itself
+		default:
+			close(c.errorChan)
+		}
 		c.errorChan = nil
 	}
 
-	slog.Info("PostgresChangeStreamConsumer closed")
+	slog.Debug("PostgresChangeStreamConsumer closed")
 	return firstErr
 }
 

@@ -3,11 +3,14 @@ package seatbelt
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 type DataFile struct {
 	File       *os.File
 	RowCounter int64
+	GenerationTime time.Duration
+	SourceDataSize int64
 }
 
 func NewDataFile(file *os.File) *DataFile {
@@ -48,4 +51,12 @@ func (f *DataFile) RowCount() int64 {
 func (f *DataFile) Rewind() error {
 	_, err := f.File.Seek(0, 0)
 	return err
+}
+
+func (f *DataFile) SetGenerationTime(generationTime time.Duration) {
+	f.GenerationTime = generationTime
+}
+
+func (f *DataFile) SetSourceDataSize(sourceDataSize int64) {
+	f.SourceDataSize = sourceDataSize
 }
