@@ -34,7 +34,6 @@ func (m *PeerDBRowMapper) TransformSourceToCommon(row []interface{}) (string, er
 		transformedValue := transformValue(row[i], col.TypeInfo.Family)
 		commonParts = append(commonParts, transformedValue)
 	}
-	fmt.Println("source commonParts", commonParts)
 	return strings.Join(commonParts, ""), nil // Consider a delimiter if needed
 }
 
@@ -79,7 +78,6 @@ func (m *PeerDBRowMapper) TransformTargetToCommon(row []interface{}) (string, er
 			}
 		}
 	}
-	fmt.Println("target commonParts", commonParts)
 	return strings.Join(commonParts, ""), nil // Consider a delimiter if needed
 }
 
