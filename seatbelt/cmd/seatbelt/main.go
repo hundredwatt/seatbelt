@@ -64,8 +64,7 @@ var rootCmd = &cobra.Command{
 	Short: "Seatbelt is a tool for data validation between sources and targets",
 	Long:  `Seatbelt helps ensure data consistency by comparing data between a source and a target system using cryptographic hashes and maintaining a shadow table.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// You can add global setup here if needed
-		slog.SetLogLoggerLevel(slog.LevelInfo)
+		slog.SetLogLoggerLevel(slog.LevelDebug)
 		fmt.Fprintf(os.Stderr, "Seatbelt %s\n", version)
 	},
 }
@@ -75,6 +74,8 @@ var runCmd = &cobra.Command{
 	Short: "Run the full Seatbelt process (fetch data and update shadow)",
 	Long:  `Loads configuration, fetches data from source and target, updates the shadow table, and prints validation metrics.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+
 		cfg, err := loadConfig(configFile)
 		if err != nil {
 			slog.Error("Error loading config file", "error", err)
@@ -469,8 +470,6 @@ var inspectCmd = &cobra.Command{
 	Short: "Inspect specific rows by primary keys",
 	Long:  `Inspect specific rows from source and target databases by their primary keys. Runs InspectScan and InspectExtractScan on the source and InspectScan on the target.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-
 		cfg, err := loadConfig(configFile)
 		if err != nil {
 			slog.Error("Error loading config file", "error", err)
