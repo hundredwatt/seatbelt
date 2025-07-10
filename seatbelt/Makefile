@@ -34,7 +34,7 @@ build-archive: build
 
 build-intel: ensure-build-dir
 	git_hash=$$(git rev-parse --short HEAD) && \
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt-intel ./cmd/seatbelt
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags="-X main.version=alpha-$$git_hash" -o build/seatbelt-intel ./cmd/seatbelt
 
 install:
 	git_hash=$$(git rev-parse --short HEAD) && \

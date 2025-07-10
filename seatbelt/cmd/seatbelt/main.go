@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"seatbelt/pkg/clickhouse"
@@ -109,9 +110,9 @@ var runCmd = &cobra.Command{
 		}
 		slog.Info("Data fetched successfully.")
 		if !initialLoad {
-			fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%.2f rows/s, %.2f MB/s)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds(), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024)
+			fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), humanize(int64(float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds())), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024)
 		}
-		fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%.2f rows/s, %.2f MB/s)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds(), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024)
+		fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), humanize(int64(float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds())), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024)
 		if !initialLoad && dataFiles.SourceChanges != nil {
 			slog.Debug("  Source Changes", "file", dataFiles.SourceChanges.Name(), "rows", dataFiles.SourceChanges.RowCount())
 		}
@@ -135,6 +136,26 @@ var runCmd = &cobra.Command{
 
 		// 4. Print Validation Metrics
 		printMetrics(metrics)
+
+		if metrics.ErrorCount > 0 {
+			errorPks := strings.Split(metrics.ErrorPKs, ";")
+			slog.Info("PKs with errors", "pks", errorPks)
+
+			// Write error PKs JSON to temp file
+			tempDir := os.Getenv(seatbelt.EnvTempDir)
+			file, err := os.CreateTemp(tempDir, fmt.Sprintf("seatbelt-errors-%s-*.json", cfg.TableName))
+			if err != nil {
+				slog.Error("Failed to create temp file for error PKs", "error", err)
+				os.Exit(1)
+			}
+			defer file.Close()
+
+			if _, err := file.WriteString(metrics.ErrorPKsJSON); err != nil {
+				slog.Error("Failed to write error PKs to temp file", "error", err)
+				os.Exit(1)
+			}
+			slog.Info("Error PKs written to temp file", "file", file.Name())
+		}
 	},
 }
 
@@ -780,7 +801,7 @@ func printMetrics(metrics *seatbelt.ValidationMetrics) {
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "Path to the configuration file")
-	rootCmd.PersistentFlags().StringVarP(&configFile, "file", "f", "config.yaml", "Path to the configuration file (alias for --config)")
+	rootCmd.PersistentFlags().StringVarP(&configFile, "table", "t", "config.yaml", "Path to the configuration file (alias for --config)")
 
 	// Flags for 'run' command (also used by 'fetch')
 	runCmd.Flags().BoolVar(&fetchDataOnly, "fetch-only", false, "Only fetch data, do not update the shadow table")

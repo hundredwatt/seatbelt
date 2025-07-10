@@ -26,6 +26,9 @@ type ValidationMetrics struct {
 	ValidCount   int64
 	PendingCount int64
 	ErrorCount   int64
+
+	ErrorPKs    string
+	ErrorPKsJSON    string
 }
 
 // Constants for Operation enum values (matching Python/DuckDB extension)
@@ -208,7 +211,9 @@ const (
             COUNT(*) AS seatbelt_size,
             COUNT(*) FILTER (WHERE validation_status = %[4]d) AS error_count,
             COUNT(*) FILTER (WHERE validation_status = %[2]d) AS pending_count, -- StatusPending
-            COUNT(*) FILTER (WHERE validation_status = %[3]d) AS valid_count   -- StatusValid
+            COUNT(*) FILTER (WHERE validation_status = %[3]d) AS valid_count,   -- StatusValid
+            COALESCE(STRING_AGG(pk, ';') FILTER (WHERE validation_status = %[4]d), '') AS error_pks, -- StatusError
+            COALESCE(CAST(ARRAY_AGG(JSON_OBJECT('pk', pk, 'source_signature', source_signature, 'target_signature', target_signature)) FILTER (WHERE validation_status = %[4]d) AS STRING), '') AS error_pks_json -- StatusError
         FROM StatusCTE;
 	`
 	alterTableRenameShadowToShadowOldSQL = `ALTER TABLE shadow RENAME TO shadow_old;`
@@ -439,6 +444,8 @@ func UpdateShadow(ctx context.Context, cfg *Config, data_files *DataFileSet) (*V
 		&metrics.ErrorCount,
 		&metrics.PendingCount,
 		&metrics.ValidCount,
+		&metrics.ErrorPKs,
+		&metrics.ErrorPKsJSON,
 	)
 	slog.Debug("Metrics query completed", "duration", time.Since(metricsStart))
 	if err != nil {
