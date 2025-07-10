@@ -135,6 +135,9 @@ var runCmd = &cobra.Command{
 		slog.Debug("Shadow table updated successfully.")
 
 		// 4. Print Validation Metrics
+		if dataFiles.SourceScan != nil {
+			printSourceDataSize(dataFiles.SourceScan)
+		}
 		printMetrics(metrics)
 
 		if metrics.ErrorCount > 0 {
@@ -798,6 +801,11 @@ func printMetrics(metrics *seatbelt.ValidationMetrics) {
 	fmt.Printf("%-18s %25s\n", "Pending Rows", humanize(metrics.PendingCount))
 	fmt.Printf("%-18s %25s\n", "Error Rows", humanize(metrics.ErrorCount))
 	fmt.Println("---------------------------------------------")
+}
+
+func printSourceDataSize(sourceScan *seatbelt.DataFile) {
+	fmt.Println("--- Data Volume ---")
+	fmt.Printf("%-18s %25.2f GB\n", "Source Data Size", float64(sourceScan.SourceDataSize)/1024/1024/1024)
 }
 
 func init() {
