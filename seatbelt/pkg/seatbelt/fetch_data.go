@@ -69,10 +69,13 @@ func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 		}
 		targetScanStart := time.Now()
 		target_scan, err = cfg.Target.Scan(errgroupCtx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		target_scan.SetGenerationTime(time.Since(targetScanStart))
 		target_scan.SetSourceDataSize(targetDataSize)
 		slog.Debug("Target scan completed", "duration", target_scan.GenerationTime)
-		return err
+		return nil
 	})
 
 	sg.Go(func() error {
@@ -83,10 +86,13 @@ func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 		}
 		sourceScanStart := time.Now()
 		source_scan, err = cfg.Source.Scan(errgroupCtx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		source_scan.SetGenerationTime(time.Since(sourceScanStart))
 		source_scan.SetSourceDataSize(sourceDataSize)
 		slog.Debug("Source scan completed", "duration", source_scan.GenerationTime)
-		return err
+		return nil
 	})
 
 	if err := sg.Wait(); err != nil {
@@ -118,28 +124,52 @@ func initialLoad(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 	var source_extract_scan *DataFile
 
 	sg.Go(func() error {
+		targetDataSize, err := cfg.Target.DataSize(ctx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		targetScanStart := time.Now()
-		var err error
 		target_scan, err = cfg.Target.Scan(ctx, cfg.Table)
-		slog.Debug("Target scan completed", "duration", time.Since(targetScanStart))
-		return err
+		if err != nil {
+			return err
+		}
+		target_scan.SetGenerationTime(time.Since(targetScanStart))
+		target_scan.SetSourceDataSize(targetDataSize)
+		slog.Debug("Target scan completed", "duration", target_scan.GenerationTime)
+		return nil
 	})
 
 	sg.Go(func() error {
+		sourceDataSize, err := cfg.Source.DataSize(ctx, cfg.Table)
+		if err != nil {
+			return err
+		}
 		sourceExtractScanStart := time.Now()
-		var err error
 		source_extract_scan, err = cfg.Source.ExtractScan(ctx, cfg.Table)
-		slog.Debug("Source extract scan completed", "duration", time.Since(sourceExtractScanStart))
-		return err
+		if err != nil {
+			return err
+		}
+		source_extract_scan.SetGenerationTime(time.Since(sourceExtractScanStart))
+		source_extract_scan.SetSourceDataSize(sourceDataSize)
+		slog.Debug("Source extract scan completed", "duration", source_extract_scan.GenerationTime)
+		return nil
 	})
 
 	if cfg.TestingSourceScan {
 		sg.Go(func() error {
+			sourceDataSize, err := cfg.Source.DataSize(ctx, cfg.Table)
+			if err != nil {
+				return err
+			}
 			sourceScanStart := time.Now()
-			var err error
 			source_scan, err = cfg.Source.Scan(ctx, cfg.Table)
-			slog.Debug("Source scan completed", "duration", time.Since(sourceScanStart))
-			return err
+			if err != nil {
+				return err
+			}
+			source_scan.SetGenerationTime(time.Since(sourceScanStart))
+			source_scan.SetSourceDataSize(sourceDataSize)
+			slog.Debug("Source scan completed", "duration", source_scan.GenerationTime)
+			return nil
 		})
 	}
 
