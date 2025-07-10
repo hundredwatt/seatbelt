@@ -111,6 +111,77 @@ func TestPeerDB_PG_To_CH(t *testing.T) {
 	}
 }
 
+var json_table_definition = &seatbelt.TableDefinition{
+	SourceDatabase: seatbelt.POSTGRES,
+	TargetDatabase: seatbelt.CLICKHOUSE,
+	TableName:      "public.json_example",
+	TargetTableName:    "peerdb.public_json_example",
+	PrimaryKeyName:     "id",
+	Columns: []seatbelt.ColumnMapping{
+		{Name: "json_data", SourceType: "jsonb", TargetType: "String"},
+	},
+}
+
+var json_table = &seatbelt.DefaultTable{
+	TableDefinition: *json_table_definition,
+	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(
+		&postgres.PostgresSourceHasher{TableDefinition: json_table_definition},
+		&clickhouse.ClickHouseTargetHasher{TableDefinition: json_table_definition},
+		row_mappers.NewPeerDBRowMapper(*json_table_definition),
+	),
+}
+
+func TestPeerDB_PG_To_CH_JSON(t *testing.T) {
+	ctx := context.Background()
+	pgxPool := openPgxPool(ctx, t)
+	defer pgxPool.Close()
+
+	ch_conn, err := sql.Open("clickhouse", testClickHouseConnString)
+	if err != nil {
+		t.Fatalf("Failed to open clickhouse connection: %v", err)
+	}
+	defer ch_conn.Close()
+
+	source := postgres.NewPostgresSource(pgxPool)
+	target := clickhouse.NewClickHouseTarget(ch_conn)
+
+	result, err := seatbelt.FetchData(ctx, &seatbelt.Config{
+		Table:             json_table,
+		Source:            source,
+		Target:            target,
+		InitialLoad:       true,
+		TestingSourceScan: true,
+	})
+	assert.NoError(t, err)
+	defer os.Remove(result.SourceScan.File.Name())
+	defer os.Remove(result.SourceExtractScan.File.Name())
+	defer os.Remove(result.TargetScan.File.Name())
+
+	assert.Equal(t, int64(3), result.SourceScan.RowCount())
+
+	for i := range 3 {
+		pk := i + 1
+
+		line, err := testutil.FindLineWithPrefix(result.SourceExtractScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts := strings.Split(line, ",")
+		source_hash := parts[1]
+		target_hash := parts[2]
+
+		line, err = testutil.FindLineWithPrefix(result.SourceScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts = strings.Split(line, ",")
+		source_hash_2 := parts[1]
+		assert.Equal(t, source_hash, source_hash_2, "source_hash mismatch for pk %d", pk)
+
+		line, err = testutil.FindLineWithPrefix(result.TargetScan.File, fmt.Sprintf("%d,", pk))
+		assert.NoError(t, err)
+		parts = strings.Split(line, ",")
+		target_hash_2 := parts[1]
+		assert.Equal(t, target_hash, target_hash_2, "target_hash mismatch for pk %d", pk)
+	}
+}
+
 // --- Test Helper Functions ---
 
 func openPgxPool(ctx context.Context, t *testing.T) *pgxpool.Pool {

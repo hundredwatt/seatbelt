@@ -1,9 +1,11 @@
 package row_mappers
 
 import (
+	"encoding/json"
 	"fmt"
 	"seatbelt/pkg/seatbelt"
 	"seatbelt/pkg/typesystem" // Import typesystem
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,6 +34,7 @@ func (m *PeerDBRowMapper) TransformSourceToCommon(row []interface{}) (string, er
 		transformedValue := transformValue(row[i], col.TypeInfo.Family)
 		commonParts = append(commonParts, transformedValue)
 	}
+	fmt.Println("source commonParts", commonParts)
 	return strings.Join(commonParts, ""), nil // Consider a delimiter if needed
 }
 
@@ -43,17 +46,40 @@ func (m *PeerDBRowMapper) TransformTargetToCommon(row []interface{}) (string, er
 	}
 
 	var commonParts []string
-	for i, col := range m.tableDef.TargetColumns() {
-		switch col.TypeInfo.Family {
-		case typesystem.FloatFamily, typesystem.DecimalFamily:
-			commonParts = append(commonParts, fmt.Sprintf("%f", row[i]))
-		case typesystem.IntegerFamily:
-			commonParts = append(commonParts, fmt.Sprintf("%d", row[i]))
-		default:
-			commonParts = append(commonParts, fmt.Sprintf("%v", row[i]))
+	sourceColumns := m.tableDef.SourceColumns()
+	targetColumns := m.tableDef.TargetColumns()
+
+	for i, col := range targetColumns {
+		if row[i] == nil {
+			commonParts = append(commonParts, "0")
+			continue
 		}
 
+		// For JSON normalization, check the source column type family
+		// since JSON columns are stored as strings in the target (ClickHouse)
+		var sourceFamily typesystem.TypeFamily = typesystem.UnknownFamily
+		if i < len(sourceColumns) && sourceColumns[i].TypeInfo != nil {
+			sourceFamily = sourceColumns[i].TypeInfo.Family
+		}
+
+		// Use source type family for JSON detection, target type family for other transformations
+		if sourceFamily == typesystem.JSONFamily {
+			// JSON/JSONB columns from PostgreSQL are delivered to ClickHouse as strings
+			// We need to normalize them the same way as the source
+			jsonStr := fmt.Sprintf("%v", row[i])
+			commonParts = append(commonParts, normalizeJSON(jsonStr))
+		} else {
+			switch col.TypeInfo.Family {
+			case typesystem.FloatFamily, typesystem.DecimalFamily:
+				commonParts = append(commonParts, fmt.Sprintf("%f", row[i]))
+			case typesystem.IntegerFamily:
+				commonParts = append(commonParts, fmt.Sprintf("%d", row[i]))
+			default:
+				commonParts = append(commonParts, fmt.Sprintf("%v", row[i]))
+			}
+		}
 	}
+	fmt.Println("target commonParts", commonParts)
 	return strings.Join(commonParts, ""), nil // Consider a delimiter if needed
 }
 
@@ -63,7 +89,6 @@ func transformValue(value interface{}, family typesystem.TypeFamily) string {
 		return "0" // Use NULL representation for nil (Changed from "0")
 	}
 
-
 	switch family {
 	case typesystem.FloatFamily:
 		return transformFloatString(value.(string))
@@ -71,6 +96,8 @@ func transformValue(value interface{}, family typesystem.TypeFamily) string {
 		return transformDecimalString(value.(string))
 	case typesystem.DateTimeFamily:
 		return transformDateTimeString(value.(string))
+	case typesystem.JSONFamily:
+		return normalizeJSON(value.(string))
 	default:
 		return value.(string)
 	}
@@ -100,7 +127,11 @@ func formatValueByFamily(value interface{}, family typesystem.TypeFamily) string
 			// Fallback if it's not a time.Time (e.g., a string already)
 			return fmt.Sprintf("%v", value)
 		}
-	case typesystem.StringFamily, typesystem.UUIDFamily, typesystem.EnumFamily, typesystem.NetworkFamily, typesystem.GeometricFamily, typesystem.JSONFamily, typesystem.XMLFamily:
+	case typesystem.JSONFamily:
+		// JSON family needs special normalization for deterministic key ordering
+		jsonStr := fmt.Sprintf("%s", value)
+		return normalizeJSON(jsonStr)
+	case typesystem.StringFamily, typesystem.UUIDFamily, typesystem.EnumFamily, typesystem.NetworkFamily, typesystem.GeometricFamily, typesystem.XMLFamily:
 		// Treat these families generally as strings
 		return fmt.Sprintf("%s", value)
 	case typesystem.BinaryFamily:
@@ -148,6 +179,99 @@ func transformDateTimeString(s string) string {
 		return t.Format("2006-01-02 15:04:05.000000")
 	}
 	return s
+}
+
+// normalizeJSON normalizes a JSON string by parsing it and re-encoding with sorted keys
+// This ensures deterministic string representation for JSON/JSONB columns
+func normalizeJSON(jsonStr string) string {
+	if jsonStr == "" {
+		return ""
+	}
+
+	// Parse the JSON string into a generic interface{}
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		// If parsing fails, return the original string
+		return jsonStr
+	}
+
+	// Sort the keys recursively
+	normalized := sortJSONKeys(parsed)
+
+	// Re-encode with deterministic key ordering
+	result, err := json.Marshal(normalized)
+	if err != nil {
+		// If marshaling fails, return the original string
+		return jsonStr
+	}
+
+	// Add spaces after commas and colons for consistent formatting
+	return addSpacesAfterSeparators(string(result))
+}
+
+// sortJSONKeys recursively sorts keys in JSON objects to ensure deterministic ordering
+func sortJSONKeys(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Create a new map with sorted keys
+		sorted := make(map[string]interface{})
+
+		// Get all keys and sort them
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		// Add items to new map in sorted key order, recursively sorting values
+		for _, key := range keys {
+			sorted[key] = sortJSONKeys(v[key])
+		}
+		return sorted
+
+	case []interface{}:
+		// For arrays, recursively sort each element
+		for i, item := range v {
+			v[i] = sortJSONKeys(item)
+		}
+		return v
+
+	default:
+		// For primitive values (string, number, bool, null), return as-is
+		return v
+	}
+}
+
+// addSpacesAfterSeparators inserts a space after each comma and colon that are not inside a string.
+// This ensures deterministic formatting of the JSON string while preserving string contents.
+func addSpacesAfterSeparators(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/10) // small optimization: pre-allocate slightly more capacity
+
+	inString := false
+	escape := false
+
+	for _, r := range s {
+		if r == '"' && !escape {
+			inString = !inString
+		}
+
+		if !inString && (r == ',' || r == ':') {
+			b.WriteRune(r)
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+
+		// Track escape character state when inside strings
+		if r == '\\' && !escape {
+			escape = true
+		} else {
+			escape = false
+		}
+	}
+
+	return b.String()
 }
 
 /*
