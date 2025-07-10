@@ -162,6 +162,10 @@ func (s *TestingSource) StartChangeStreamConsumer(ctx context.Context, table sea
 	return NewTestingChangeStreamConsumer(table)
 }
 
+func (s *TestingSource) DataSize(ctx context.Context, table seatbelt.Table) (int64, error) {
+	return int64(len(s.Data)), nil
+}
+
 type TestingChangeStreamConsumer struct {
 	Data         []map[string]interface{}
 	OutputFile   *seatbelt.DataFile
@@ -333,6 +337,10 @@ func (t *TestingTarget) Scan(ctx context.Context, table seatbelt.Table) (*seatbe
 
 	file.Rewind()
 	return file, nil
+}
+
+func (t *TestingTarget) DataSize(ctx context.Context, table seatbelt.Table) (int64, error) {
+	return int64(len(t.Data)), nil
 }
 
 type TestingRowMapperAndHasher struct {
