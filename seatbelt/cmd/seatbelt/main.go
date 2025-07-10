@@ -466,6 +466,8 @@ var inspectCmd = &cobra.Command{
 	Short: "Inspect specific rows by primary keys",
 	Long:  `Inspect specific rows from source and target databases by their primary keys. Runs InspectScan and InspectExtractScan on the source and InspectScan on the target.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+
 		cfg, err := loadConfig(configFile)
 		if err != nil {
 			slog.Error("Error loading config file", "error", err)

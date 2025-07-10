@@ -232,9 +232,9 @@ def show_diff(a: Dict[str, Any], b: Dict[str, Any], a_label: str, b_label: str) 
 
 def parse_inspect_results(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Parse the inspect results text to extract file paths."""
-    source_scan_pattern = r"Source\s+inspect\s+scan\s+file:\s+(.+\.csv)"
-    source_extract_pattern = r"Source\s+inspect\s+extract\s+scan\s+file:\s+(.+\.csv)"
-    target_scan_pattern = r"Target\s+inspect\s+scan\s+file:\s+(.+\.csv)"
+    source_scan_pattern = r"Source inspect scan file file=(.+\.csv)"
+    source_extract_pattern = r"Source inspect extract scan file file=(.+\.csv)" 
+    target_scan_pattern = r"Target inspect scan file file=(.+\.csv)"
     
     source_scan_match = re.search(source_scan_pattern, text)
     source_extract_match = re.search(source_extract_pattern, text)

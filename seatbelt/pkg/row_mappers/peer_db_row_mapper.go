@@ -204,7 +204,7 @@ func normalizeJSON(jsonStr string) string {
 	}
 
 	// Add spaces after commas and colons for consistent formatting
-	return addSpacesAfterSeparators(string(result))
+	return string(result)
 }
 
 // sortJSONKeys recursively sorts keys in JSON objects to ensure deterministic ordering
