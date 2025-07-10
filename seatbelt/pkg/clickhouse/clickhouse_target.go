@@ -42,25 +42,24 @@ func (t *ClickHouseTarget) DataSize(ctx context.Context, table seatbelt.Table) (
 		tableName = targetName
 	}
 
-	var totalBytes sql.NullInt64
-	query := `SELECT total_bytes FROM system.tables WHERE database = ? AND name = ?`
-	err := t.conn.QueryRowContext(ctx, query, database, tableName).Scan(&totalBytes)
+	var totalUncompressedBytes sql.NullInt64
+	query := `SELECT sum(data_uncompressed_bytes) FROM system.columns WHERE database = ? AND table = ?`
+	err := t.conn.QueryRowContext(ctx, query, database, tableName).Scan(&totalUncompressedBytes)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("table %s not found in system.tables", targetName)
+			return 0, fmt.Errorf("table %s not found in system.columns", targetName)
 		}
-		return 0, fmt.Errorf("failed to get table size for %s: %w", targetName, err)
+		return 0, fmt.Errorf("failed to get table uncompressed size for %s: %w", targetName, err)
 	}
 
-	if !totalBytes.Valid {
-		// This might be redundant if total_bytes is never null for an existing table,
-		// but it's safe to keep. If a table exists, it should have a size (even 0).
-		return 0, fmt.Errorf("table size is null for %s", targetName)
+	if !totalUncompressedBytes.Valid {
+		// This might happen if the table has no data or no columns
+		return 0, fmt.Errorf("table uncompressed size is null for %s", targetName)
 	}
 
-	slog.Debug("Got clickhouse table data size", "table", targetName, "size_bytes", totalBytes.Int64)
+	slog.Debug("Got clickhouse table uncompressed data size", "table", targetName, "uncompressed_size_bytes", totalUncompressedBytes.Int64)
 
-	return totalBytes.Int64, nil
+	return totalUncompressedBytes.Int64, nil
 }
 
 // Scan retrieves rows from ClickHouse and computes hashes for comparison
