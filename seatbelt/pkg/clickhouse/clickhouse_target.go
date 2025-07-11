@@ -95,6 +95,7 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 			%s AS pk,
 			xxh3(%s) AS target_hash
 		FROM %s
+		WHERE _peerdb_is_deleted = 0
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.TargetName())
 
 	// Execute the query

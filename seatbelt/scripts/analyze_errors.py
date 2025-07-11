@@ -7,6 +7,7 @@ Analyzes error output from seatbelt Go implementation and provides detailed diff
 import os
 import sys
 import argparse
+from datetime import datetime
 import json
 import yaml
 import psycopg2
@@ -214,6 +215,28 @@ def get_target_rows(ch_client, config, pks):
         logger.error(f"Error fetching target rows: {str(e)}")
         return {}
 
+def equal_values(source_value, target_value):
+    """Compare values of source and target row data."""
+    if source_value is None and target_value is None:
+        return True
+    if source_value is None or target_value is None:
+        return False
+    
+    if isinstance(source_value, float) and isinstance(target_value, float):
+        return True # TODO: handle floating point precision
+    
+    if isinstance(source_value, dict):
+        source_json = json.dumps(source_value, sort_keys=True, separators=(',', ':'))
+        return source_json == target_value
+    
+    return source_value == target_value
+
+def truncate_string(value, max_length=100):
+    """Truncate a string to a maximum length."""
+    if isinstance(value, str):
+        return value[:max_length] + "..." if len(value) > max_length else value
+    return value
+
 def generate_diff(source_data, target_data):
     """Generate a colored diff between source and target row data."""
     if not source_data or not target_data:
@@ -224,15 +247,43 @@ def generate_diff(source_data, target_data):
 
     for key in all_keys:
         if key not in source_data:
-            diff_lines.append(f"{Fore.GREEN}+ {key}: {target_data[key]}{Style.RESET_ALL}")
+            # Field only exists in target
+            diff_lines.append(f"{Fore.CYAN}{key}:{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.LIGHTBLACK_EX}Source: <missing>{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.GREEN}Target: {truncate_string(target_data[key])}{Style.RESET_ALL}")
         elif key not in target_data:
-            diff_lines.append(f"{Fore.RED}- {key}: {source_data[key]}{Style.RESET_ALL}")
-        elif source_data[key] != target_data[key]:
-            diff_lines.append(f"{Fore.YELLOW}~ {key}:{Style.RESET_ALL}")
-            diff_lines.append(f"{Fore.RED}- {source_data[key]}{Style.RESET_ALL}")
-            diff_lines.append(f"{Fore.GREEN}+ {target_data[key]}{Style.RESET_ALL}")
+            # Field only exists in source
+            diff_lines.append(f"{Fore.CYAN}{key}:{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.RED}Source: {truncate_string(source_data[key])}{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.LIGHTBLACK_EX}Target: <missing>{Style.RESET_ALL}")
+        elif not equal_values(source_data[key], target_data[key]):
+            # Field values differ
+            diff_lines.append(f"{Fore.CYAN}{key}:{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.RED}Source: {truncate_string(source_data[key])}{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.GREEN}Target: {truncate_string(target_data[key])}{Style.RESET_ALL}")
+        else: 
+            # Field values are equal - show in dimmed color
+            source_value = source_data[key]
+            target_value = target_data[key]
+            
+            if isinstance(source_value, dict):
+                source_value = json.dumps(source_value)
+            if isinstance(target_value, dict):
+                target_value = json.dumps(target_value)
+            
+            # Format datetimes
+            if isinstance(source_value, datetime):
+                source_value = source_value.isoformat()
+            if isinstance(target_value, datetime):
+                target_value = target_value.strftime('%Y-%m-%d %H:%M:%S.%f%z')
 
-    return "\n".join(diff_lines) if diff_lines else "No differences found"
+            diff_lines.append(f"{Fore.LIGHTBLACK_EX}{key}:{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.LIGHTBLACK_EX}Source: {truncate_string(source_value)}{Style.RESET_ALL}")
+            diff_lines.append(f"  {Fore.LIGHTBLACK_EX}Target: {truncate_string(target_value)}{Style.RESET_ALL}")
+
+        diff_lines.append("")  # Add blank line between fields
+
+    return "\n".join(diff_lines[:-1]) if diff_lines else "No differences found"  # Remove last blank line
 
 def print_summary(source_only, target_only, drifted, total_errors):
     """Print validation summary."""
@@ -279,6 +330,11 @@ def print_error_details(config, pg_conn, ch_client, source_only, target_only, dr
         for pk in sorted(drifted):
             source_data = source_rows.get(pk, {})
             target_data = target_rows.get(pk, {})
+
+            # Remove primary key from diff output
+            del source_data[config['primary_key_name']]
+            del target_data[config['primary_key_name']]
+
             diff = generate_diff(source_data, target_data)
 
             table_data.append([

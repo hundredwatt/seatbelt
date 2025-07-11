@@ -1,0 +1,43 @@
+# Example Seatbelt Configuration for Local Docker Test Environment
+
+# --- Connection Strings ---
+# Matches the services defined in seatbelt/test/docker-compose.yml
+
+source_connection_string: "postgres://postgres:postgres@localhost:55810/seatbelt"
+target_connection_string: "clickhouse://default:pass@localhost:9000/peerdb?dial_timeout=5s&read_timeout=20s&password=pass"
+
+# --- Row Mapper ---
+# Specifies how to map and hash rows. 'peer_db' is the currently supported one.
+row_mapper_name: "peer_db"
+
+# --- Table Configuration ---
+# Source table name (including schema if applicable)
+table_name: "public.json_example"
+
+# Target table name (optional, if different from source_table_name)
+target_table_name: "peerdb.public_json_example"
+
+# Primary key column name (required)
+primary_key_name: "id"
+
+# --- Column Mapping ---
+# Define how columns map between source and target, including their types.
+# These should match the table definitions in seatbelt/test/postgres-init/init.sql
+# and seatbelt/test/clickhouse-init/init.sql
+columns:
+  - name: "json_data"
+    source_type: "jsonb"
+    target_type: "String"
+  - name: "int_value"
+    source_type: "int"
+    target_type: "Int64"
+# Note: Primary key column ('id' in this case) is typically handled implicitly
+# by the row mapper or core logic, but ensure it exists in both tables.
+
+# --- Seatbelt Data Path (Optional) ---
+seatbelt_data_path: "tmp/seatbelt-examples-json-example.db" 
+
+# --- Environment Variables ---
+# These are set when the application starts
+environment:
+  SEATBELT_TEMP_DIR: "tmp/" 
