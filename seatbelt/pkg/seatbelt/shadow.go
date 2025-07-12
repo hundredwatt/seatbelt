@@ -155,8 +155,8 @@ const (
 				COALESCE(shadow.validation_error, FALSE), -- Provide default for new rows
 				 -- Use specific signature type function, assuming INT here
 				verify_row_integrity_i_u(
-					incremental.source_signature,
-					incremental.target_signature,
+					COALESCE(incremental.source_signature, shadow.incremental_source_signature),
+					COALESCE(incremental.target_signature, shadow.incremental_target_signature),
 					source.source_signature,
 					target_dupes_counted.target_signature
 				)

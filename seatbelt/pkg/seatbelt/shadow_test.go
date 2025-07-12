@@ -151,6 +151,83 @@ func TestUpdateShadow_DuplicateRows(t *testing.T) {
 	assert.Equal(t, int64(2), metrics.ErrorCount)
 }
 
+func TestUpdateShadow_CorruptUpdate(t *testing.T) {
+	// sourcePath1 := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "source-scan-corrupt-update-1.csv")
+	sourcePath2 := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "source-scan-corrupt-update-2.csv")
+	targetPath1 := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "target-scan-corrupt-update-1.csv")
+	targetPath2 := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "target-scan-corrupt-update-2.csv")
+	sourceExtractPath := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "source-extract-corrupt-update.csv")
+	changes := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "source-changes-corrupt-update.csv")
+	changesBlank := filepath.Join("..", "..", "test", "testdata", "example_datafiles", "source-changes-corrupt-update-blank.csv")
+
+	data_files, cleanup := buildDataFileSet(t, "", targetPath1, sourceExtractPath, "")
+	defer cleanup()
+
+	shadow_file, err := os.CreateTemp("", "shadow_initial.dat")
+	if err != nil {
+		t.Fatalf("Failed to create shadow file: %v", err)
+	}
+	defer os.Remove(shadow_file.Name())
+
+	cfg := &seatbelt.Config{
+		ShadowPath:  shadow_file.Name(),
+		InitialLoad: true, // Set initial load flag
+	}
+	os.Remove(shadow_file.Name())
+
+	// Initial load
+	metrics, err := seatbelt.UpdateShadow(context.Background(), cfg, data_files)
+	if err != nil {
+		t.Fatalf("Failed to update shadow with initial load: %v", err)
+	}
+
+	assert.Equal(t, int64(3), metrics.SourceSize)
+	assert.Equal(t, int64(3), metrics.TargetSize)
+	assert.Equal(t, int64(3), metrics.SeatbeltSize)
+	assert.Equal(t, int64(3), metrics.ValidCount)
+	assert.Equal(t, int64(0), metrics.PendingCount)
+	assert.Equal(t, int64(0), metrics.ErrorCount)
+
+	// Subsequent load
+	data_files, cleanup = buildDataFileSet(t, sourcePath2, targetPath2, "", changes)
+	defer cleanup()
+
+	cfg = &seatbelt.Config{
+		ShadowPath: shadow_file.Name(),
+	}
+	metrics, err = seatbelt.UpdateShadow(context.Background(), cfg, data_files)
+	if err != nil {
+		t.Fatalf("Failed to update shadow: %v", err)
+	}
+
+	assert.Equal(t, int64(3), metrics.SourceSize)
+	assert.Equal(t, int64(3), metrics.TargetSize)
+	assert.Equal(t, int64(3), metrics.SeatbeltSize)
+	assert.Equal(t, int64(2), metrics.ValidCount)
+	assert.Equal(t, int64(1), metrics.PendingCount)
+	assert.Equal(t, int64(0), metrics.ErrorCount)
+
+	// Subsequent check
+	data_files, cleanup = buildDataFileSet(t, sourcePath2, targetPath2, "", changesBlank)
+	defer cleanup()
+
+	cfg = &seatbelt.Config{
+		ShadowPath: shadow_file.Name(),
+	}
+	metrics, err = seatbelt.UpdateShadow(context.Background(), cfg, data_files)
+	if err != nil {
+		t.Fatalf("Failed to update shadow: %v", err)
+	}
+
+	assert.Equal(t, int64(3), metrics.SourceSize)
+	assert.Equal(t, int64(3), metrics.TargetSize)
+	assert.Equal(t, int64(3), metrics.SeatbeltSize)
+	assert.Equal(t, int64(2), metrics.ValidCount)
+	assert.Equal(t, int64(0), metrics.PendingCount)
+	assert.Equal(t, int64(1), metrics.ErrorCount)
+}
+
+
 // buildDataFileSet is a helper function to create a DataFileSet from file paths.
 // It opens the files specified by non-empty paths and populates the DataFileSet.
 // It's the caller's responsibility to close the files in the returned DataFileSet.

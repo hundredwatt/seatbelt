@@ -60,3 +60,11 @@ func (f *DataFile) SetGenerationTime(generationTime time.Duration) {
 func (f *DataFile) SetSourceDataSize(sourceDataSize int64) {
 	f.SourceDataSize = sourceDataSize
 }
+
+func (f *DataFile) FileSize() (int64, error) {
+	fileInfo, err := f.File.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return fileInfo.Size(), nil
+}

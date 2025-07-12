@@ -101,11 +101,11 @@ func defaultFetchData(ctx context.Context, cfg *Config) (*DataFileSet, error) {
 
 	consumeStart := time.Now()
 	source_changes, err := consumer.ConsumeToCompletion()
-	source_changes.SetGenerationTime(time.Since(consumeStart))
-	slog.Debug("Consumer ConsumeToCompletion completed", "duration", source_changes.GenerationTime)
 	if err != nil {
 		return nil, err
 	}
+	source_changes.SetGenerationTime(time.Since(consumeStart))
+	slog.Debug("Consumer ConsumeToCompletion completed", "duration", source_changes.GenerationTime)
 
 	return &DataFileSet{
 		TargetScan:    target_scan,

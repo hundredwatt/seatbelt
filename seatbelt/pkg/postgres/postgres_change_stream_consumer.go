@@ -51,7 +51,7 @@ type PostgresChangeStreamConsumer struct {
 	loopWg              sync.WaitGroup                  // Waits for the replication loop goroutine
 }
 
-const defaultIdleTimeout = 10 * time.Second // Shorter default for testing
+const defaultIdleTimeout = 10 * time.Second // Reasonable default for production
 const defaultDebug = false
 const defaultSlotName = "seatbelt_test_slot"       // Placeholder
 const defaultPublicationName = "seatbelt_test_pub" // Placeholder
@@ -213,10 +213,37 @@ func (c *PostgresChangeStreamConsumer) runReplicationLoop() {
 			idle := c.idleTimeout > 0 && time.Since(c.lastActivity) > c.idleTimeout
 			c.mutex.Unlock()
 			if idle {
-				idleErr := fmt.Errorf("no activity detected for %v, stopping replication consumer", c.idleTimeout)
-				slog.Error("No activity detected, stopping replication consumer", "idle_timeout", c.idleTimeout)
-				c.errorChan <- idleErr // Signal idle timeout as an error
-				return                 // Exit loop
+				slog.Info("No activity detected, completing replication gracefully", "idle_timeout", c.idleTimeout)
+				// Check if completion was already requested - if so, we can exit normally
+				c.mutex.Lock()
+				completionRequested := c.completionRequested
+				c.mutex.Unlock()
+				
+				if completionRequested {
+					// We're already in completion mode, just exit normally
+					return
+				}
+				
+				// If not in completion mode, trigger completion gracefully
+				// This allows the consumer to finish processing and return results
+				// instead of erroring out
+				c.mutex.Lock()
+				c.completionRequested = true
+				c.mutex.Unlock()
+				
+				// Determine target LSN for graceful completion
+				if err := c.determineTargetLSN(); err != nil {
+					slog.Error("Failed to determine target LSN for graceful completion", "error", err)
+					c.errorChan <- fmt.Errorf("failed to complete gracefully after idle timeout: %w", err)
+					return
+				}
+				
+				// Signal that we've reached the target (since there's no more activity)
+				c.mutex.Lock()
+				close(c.targetLSNReached)
+				c.completionRequested = false // Reset flag
+				c.mutex.Unlock()
+				return // Exit normally
 			}
 		default:
 			// non-blocking check
@@ -466,13 +493,19 @@ func (c *PostgresChangeStreamConsumer) ConsumeToCompletion() (*seatbelt.DataFile
 			// Proceed to final write
 			goto finalizeData
 		case err := <-c.errorChan:
+			// Check if this is a context cancellation (which can be normal)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				slog.Debug("Replication loop exited due to context cancellation", "error", err)
+				// This might be normal if the loop exited gracefully, proceed to finalize
+				goto finalizeData
+			}
 			slog.Error("Replication loop exited with error while waiting for LSN", "error", err)
 			_ = c.Close() // Best effort close
 			return nil, fmt.Errorf("replication loop failed during completion: %w", err)
 		case <-c.ctx.Done():
-			slog.Error("Context cancelled while waiting for target LSN", "error", c.ctx.Err())
-			_ = c.Close() // Best effort close
-			return nil, fmt.Errorf("context cancelled during completion: %w", c.ctx.Err())
+			slog.Debug("Context cancelled while waiting for target LSN", "error", c.ctx.Err())
+			// This might be normal if the loop exited gracefully, proceed to finalize
+			goto finalizeData
 		case <-walAdvanceTicker.C:
 			// Force WAL advancement to help reach target LSN
 			slog.Debug("Sending WAL message to advance LSN toward target", "target_lsn", c.targetLSN.String())

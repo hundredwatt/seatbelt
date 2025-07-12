@@ -111,9 +111,31 @@ var runCmd = &cobra.Command{
 		}
 		slog.Info("Data fetched successfully.")
 		if !initialLoad {
-			fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), humanize(int64(float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds())), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024)
+			// Calculate transfer efficiency percentage for source scan
+			fileSize, err := dataFiles.SourceScan.FileSize()
+			var transferEfficiencyPct float64
+			if err == nil && fileSize > 0 && dataFiles.SourceScan.SourceDataSize > 0 {
+				transferEfficiencyPct = (float64(fileSize) / float64(dataFiles.SourceScan.SourceDataSize)) * 100
+			}
+			
+			if err == nil && fileSize > 0 && dataFiles.SourceScan.SourceDataSize > 0 {
+				fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%s rows/s, %.2f MB/s, %.1f%% transfer efficiency)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), humanize(int64(float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds())), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024, transferEfficiencyPct)
+			} else {
+				fmt.Fprintf(os.Stderr, "Source scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.SourceScan.GenerationTime, humanize(dataFiles.SourceScan.RowCount()), humanize(int64(float64(dataFiles.SourceScan.RowCount())/dataFiles.SourceScan.GenerationTime.Seconds())), float64(dataFiles.SourceScan.SourceDataSize)/dataFiles.SourceScan.GenerationTime.Seconds()/1024/1024)
+			}
 		}
-		fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), humanize(int64(float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds())), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024)
+		// Calculate transfer efficiency percentage for target scan
+		targetFileSize, targetErr := dataFiles.TargetScan.FileSize()
+		var targetTransferEfficiencyPct float64
+		if targetErr == nil && targetFileSize > 0 && dataFiles.TargetScan.SourceDataSize > 0 {
+			targetTransferEfficiencyPct = (float64(targetFileSize) / float64(dataFiles.TargetScan.SourceDataSize)) * 100
+		}
+		
+		if targetErr == nil && targetFileSize > 0 && dataFiles.TargetScan.SourceDataSize > 0 {
+			fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%s rows/s, %.2f MB/s, %.1f%% transfer efficiency)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), humanize(int64(float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds())), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024, targetTransferEfficiencyPct)
+		} else {
+			fmt.Fprintf(os.Stderr, "Target scan completed in %s, %s rows (%s rows/s, %.2f MB/s)\n", dataFiles.TargetScan.GenerationTime, humanize(dataFiles.TargetScan.RowCount()), humanize(int64(float64(dataFiles.TargetScan.RowCount())/dataFiles.TargetScan.GenerationTime.Seconds())), float64(dataFiles.TargetScan.SourceDataSize)/dataFiles.TargetScan.GenerationTime.Seconds()/1024/1024)
+		}
 		if !initialLoad && dataFiles.SourceChanges != nil {
 			slog.Debug("  Source Changes", "file", dataFiles.SourceChanges.Name(), "rows", dataFiles.SourceChanges.RowCount())
 		}
