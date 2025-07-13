@@ -199,8 +199,9 @@ def get_target_rows(ch_client, config, pks):
 
     query = f"""
         SELECT {columns_str}
-        FROM {table_name}
-        WHERE {primary_key} IN ({placeholders})
+        FROM {table_name} FINAL
+        WHERE _peerdb_is_deleted = 0
+        AND {primary_key} IN ({placeholders})
     """
 
     try:

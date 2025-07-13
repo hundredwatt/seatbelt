@@ -170,8 +170,9 @@ func (t *ClickHouseTarget) InspectScan(ctx context.Context, table seatbelt.Table
 			%s AS pk,
 			xxh3(%s) AS target_hash,
 			replaceAll(replaceAll(%s, '\n', '\\n'), '\r', '\\r') AS target_text
-		FROM %s
-		WHERE %s IN (%s)
+		FROM %s FINAL
+		WHERE _peerdb_is_deleted = 0
+		AND %s IN (%s)
 	`, table.PrimaryKey(), table.SQLTextExpressionForTargetHashing(), table.SQLTextExpressionForTargetHashing(), table.TargetName(), table.PrimaryKey(), pksList)
 
 	slog.Debug("clickhouse inspect scan query", slog.String("query", query))

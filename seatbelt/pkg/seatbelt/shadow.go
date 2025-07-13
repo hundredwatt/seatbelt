@@ -70,21 +70,21 @@ const (
 				CAST(pk AS BIGINT) AS pk,
 				CAST(source_hash AS BIGINT) AS source_signature,
 				CAST(target_hash AS UBIGINT) AS target_signature
-			FROM '%s';
+			FROM read_csv('%s', columns={'pk': 'BIGINT', 'source_hash': 'BIGINT', 'target_hash': 'UBIGINT'});
 		`
 	createTargetViewSQLTemplate = `
 			CREATE TEMP VIEW target AS 
 			SELECT 
 				CAST(pk AS BIGINT) AS pk,
 				CAST(target_hash AS UBIGINT) AS target_signature
-			FROM '%s';
+			FROM read_csv('%s', columns={'pk': 'BIGINT', 'target_hash': 'UBIGINT'});
 		`
 	createSourceViewSQLTemplate = `
 		CREATE TEMP VIEW source AS 
 		SELECT 
 			CAST(pk AS BIGINT) AS pk,
 			CAST(source_hash AS BIGINT) AS source_signature
-		FROM '%s';
+		FROM read_csv('%s', columns={'pk': 'BIGINT', 'source_hash': 'BIGINT'});
 	`
 	createIncrementalViewSQLTemplate = `
 		CREATE TEMP VIEW incremental AS 
@@ -92,7 +92,7 @@ const (
 			CAST(pk AS BIGINT) AS pk,
 			CAST(source_hash AS BIGINT) AS source_signature,
 			CAST(target_hash AS UBIGINT) AS target_signature
-		FROM '%s';
+		FROM read_csv('%s', columns={'pk': 'BIGINT', 'source_hash': 'BIGINT', 'target_hash': 'UBIGINT'});
 	`
 	dropAndCreateShadowNewTableSQL = `
 		DROP TABLE IF EXISTS shadow_new;
