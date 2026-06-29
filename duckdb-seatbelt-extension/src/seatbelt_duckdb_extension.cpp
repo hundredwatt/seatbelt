@@ -5,7 +5,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
@@ -317,7 +317,7 @@ static void VerifyRowIntegrityGenericFunction(DataChunk &args, ExpressionState &
 
 // Helper to register verify_row_integrity variants
 template <typename SourceType, typename DestType>
-void RegisterVerifyRowIntegrityVariant(DatabaseInstance &instance, const std::string &name_suffix, LogicalType source_logical_type, LogicalType dest_logical_type) {
+void RegisterVerifyRowIntegrityVariant(ExtensionLoader &loader, const std::string &name_suffix, LogicalType source_logical_type, LogicalType dest_logical_type) {
     auto verify_func = ScalarFunction(
         "verify_row_integrity_" + name_suffix,
         {source_logical_type, dest_logical_type, source_logical_type, dest_logical_type},
@@ -325,7 +325,7 @@ void RegisterVerifyRowIntegrityVariant(DatabaseInstance &instance, const std::st
         VerifyRowIntegrityGenericFunction<SourceType, DestType>, // Instantiate the template
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID,
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, verify_func);
+    loader.RegisterFunction(verify_func);
 }
 
 static bool CheckForValidationErrorInternal(uint8_t source_op, uint8_t prev_source_op, uint8_t dest_op, uint8_t prev_dest_op, bool existing_error, bool row_verified) {
@@ -481,14 +481,14 @@ static void CheckForValidationErrorWithRowIntegrityFunction(DataChunk &args, Exp
 	}
 }
 
-static void LoadInternal(DatabaseInstance &instance) {
+static void LoadInternal(ExtensionLoader &loader) {
     // Register seatbelt_duckdb_count_distinct_characters UDF
     auto seatbelt_duckdb_count_distinct_characters_scalar_function = ScalarFunction(
         "seatbelt_duckdb_count_distinct_characters", {LogicalType::VARCHAR},
         LogicalType::INTEGER, SeatbeltDuckdbCountDistincCharactersScalarFun,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID, 
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, seatbelt_duckdb_count_distinct_characters_scalar_function);
+    loader.RegisterFunction(seatbelt_duckdb_count_distinct_characters_scalar_function);
 
     // Register determine_source_operation UDF
     // Takes two checksums (VARCHAR, allowing NULL) and returns operation (UTINYINT)
@@ -497,7 +497,7 @@ static void LoadInternal(DatabaseInstance &instance) {
         LogicalType::UTINYINT, DetermineSourceOperationVarcharFunction,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID,
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, determine_source_op_varchar_scalar_function);
+    loader.RegisterFunction(determine_source_op_varchar_scalar_function);
 
     // INTEGER (BIGINT) version
     auto determine_source_op_int_scalar_function = ScalarFunction(
@@ -505,7 +505,7 @@ static void LoadInternal(DatabaseInstance &instance) {
         LogicalType::UTINYINT, DetermineSourceOperationIntFunction,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID,
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, determine_source_op_int_scalar_function);
+    loader.RegisterFunction(determine_source_op_int_scalar_function);
 
     // UINTEGER (UBIGINT) version
     auto determine_source_op_uint_scalar_function = ScalarFunction(
@@ -513,7 +513,7 @@ static void LoadInternal(DatabaseInstance &instance) {
         LogicalType::UTINYINT, DetermineSourceOperationUintFunction,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID,
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, determine_source_op_uint_scalar_function);
+    loader.RegisterFunction(determine_source_op_uint_scalar_function);
 
     // Register determine_destination_operation UDF
     // Takes three booleans and returns operation (UTINYINT)
@@ -522,21 +522,21 @@ static void LoadInternal(DatabaseInstance &instance) {
         LogicalType::UTINYINT, DetermineDestinationOperationFunction,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID, 
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, determine_destination_operation_scalar_function);
+    loader.RegisterFunction(determine_destination_operation_scalar_function);
 
     // --- Register verify_row_integrity variants using template helper ---
-    RegisterVerifyRowIntegrityVariant<string_t, string_t>(instance, "varchar", LogicalType::VARCHAR, LogicalType::VARCHAR); // V, V
-    RegisterVerifyRowIntegrityVariant<int64_t, int64_t>(instance, "int", LogicalType::BIGINT, LogicalType::BIGINT);       // I, I
-    RegisterVerifyRowIntegrityVariant<uint64_t, uint64_t>(instance, "uint", LogicalType::UBIGINT, LogicalType::UBIGINT);    // U, U
+    RegisterVerifyRowIntegrityVariant<string_t, string_t>(loader, "varchar", LogicalType::VARCHAR, LogicalType::VARCHAR); // V, V
+    RegisterVerifyRowIntegrityVariant<int64_t, int64_t>(loader, "int", LogicalType::BIGINT, LogicalType::BIGINT);       // I, I
+    RegisterVerifyRowIntegrityVariant<uint64_t, uint64_t>(loader, "uint", LogicalType::UBIGINT, LogicalType::UBIGINT);    // U, U
 
-    RegisterVerifyRowIntegrityVariant<string_t, int64_t>(instance, "v_i", LogicalType::VARCHAR, LogicalType::BIGINT);     // V, I
-    RegisterVerifyRowIntegrityVariant<string_t, uint64_t>(instance, "v_u", LogicalType::VARCHAR, LogicalType::UBIGINT);    // V, U
+    RegisterVerifyRowIntegrityVariant<string_t, int64_t>(loader, "v_i", LogicalType::VARCHAR, LogicalType::BIGINT);     // V, I
+    RegisterVerifyRowIntegrityVariant<string_t, uint64_t>(loader, "v_u", LogicalType::VARCHAR, LogicalType::UBIGINT);    // V, U
 
-    RegisterVerifyRowIntegrityVariant<int64_t, string_t>(instance, "i_v", LogicalType::BIGINT, LogicalType::VARCHAR);     // I, V
-    RegisterVerifyRowIntegrityVariant<int64_t, uint64_t>(instance, "i_u", LogicalType::BIGINT, LogicalType::UBIGINT);     // I, U
+    RegisterVerifyRowIntegrityVariant<int64_t, string_t>(loader, "i_v", LogicalType::BIGINT, LogicalType::VARCHAR);     // I, V
+    RegisterVerifyRowIntegrityVariant<int64_t, uint64_t>(loader, "i_u", LogicalType::BIGINT, LogicalType::UBIGINT);     // I, U
 
-    RegisterVerifyRowIntegrityVariant<uint64_t, string_t>(instance, "u_v", LogicalType::UBIGINT, LogicalType::VARCHAR);     // U, V
-    RegisterVerifyRowIntegrityVariant<uint64_t, int64_t>(instance, "u_i", LogicalType::UBIGINT, LogicalType::BIGINT);     // U, I
+    RegisterVerifyRowIntegrityVariant<uint64_t, string_t>(loader, "u_v", LogicalType::UBIGINT, LogicalType::VARCHAR);     // U, V
+    RegisterVerifyRowIntegrityVariant<uint64_t, int64_t>(loader, "u_i", LogicalType::UBIGINT, LogicalType::BIGINT);     // U, I
 
     // Register check_for_validation_error (base version) UDF
     // Takes four operations (UTINYINT) and existing error (BOOLEAN), returns BOOLEAN
@@ -545,7 +545,7 @@ static void LoadInternal(DatabaseInstance &instance) {
         LogicalType::BOOLEAN, CheckForValidationErrorBaseFunction,
         nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID, 
         FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, check_validation_error_base_scalar_function);
+    loader.RegisterFunction(check_validation_error_base_scalar_function);
 
     // Register check_for_validation_error_with_row_integrity UDF
     // Takes four operations (UTINYINT), existing error (BOOLEAN), row verified (BOOLEAN), returns BOOLEAN
@@ -554,11 +554,11 @@ static void LoadInternal(DatabaseInstance &instance) {
          LogicalType::BOOLEAN, CheckForValidationErrorWithRowIntegrityFunction,
          nullptr, nullptr, nullptr, nullptr, LogicalType::INVALID, 
          FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING);
-    ExtensionUtil::RegisterFunction(instance, check_validation_error_integrity_scalar_function);
+    loader.RegisterFunction(check_validation_error_integrity_scalar_function);
 }
 
-void SeatbeltDuckdbExtension::Load(DuckDB &db) {
-	LoadInternal(*db.instance);
+void SeatbeltDuckdbExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
 }
 std::string SeatbeltDuckdbExtension::Name() {
 	return "seatbelt_duckdb";
@@ -576,13 +576,8 @@ std::string SeatbeltDuckdbExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void seatbelt_duckdb_init(duckdb::DatabaseInstance &db) {
-    duckdb::DuckDB db_wrapper(db);
-    db_wrapper.LoadExtension<duckdb::SeatbeltDuckdbExtension>();
-}
-
-DUCKDB_EXTENSION_API const char *seatbelt_duckdb_version() {
-	return duckdb::DuckDB::LibraryVersion();
+DUCKDB_CPP_EXTENSION_ENTRY(seatbelt_duckdb, loader) {
+	duckdb::LoadInternal(loader);
 }
 }
 
