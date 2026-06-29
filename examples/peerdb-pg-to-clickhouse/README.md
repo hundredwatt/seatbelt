@@ -90,8 +90,17 @@ rm -f tmp/shadow.db
 ./bin/seatbelt run -c config.yaml --initial-load
 ```
 
-The phantom row (`id=999`) exists in the destination but not the source, so destination count exceeds
-source count and the row fails to reconcile.
+```
+Source Row Count                          10
+Target Row Count                          11     <- the phantom row
+Valid Rows                                11
+...
+```
+
+The phantom row (`id=999`) exists in the destination but not the source, so the **destination count
+exceeds the source count** — the mismatch is the signal. In batch (`--initial-load`) mode every row
+is treated as an insert, so the extra row isn't yet promoted to an Error; on a live pipeline the Data
+Change Validation rules flag it as a phantom (see below).
 
 > **Batch vs. live:** This example validates with `--initial-load` for simplicity. On a continuously
 > running pipeline, Seatbelt instead consumes the Postgres change log so the Data Change Validation

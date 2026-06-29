@@ -24,8 +24,8 @@ until pg_isready -h localhost -p 9900 >/dev/null 2>&1; do sleep 2; done
 echo "    services up"
 
 echo "==> [2/4] Creating PeerDB peers + mirror"
-# The PeerDB server speaks the Postgres wire protocol on :9900.
-psql "postgres://postgres@localhost:9900" -v ON_ERROR_STOP=1 -f setup-peerdb.sql
+# The PeerDB server speaks the Postgres wire protocol on :9900 (default password: peerdb).
+PGPASSWORD=peerdb psql "postgres://postgres@localhost:9900" -v ON_ERROR_STOP=1 -f setup-peerdb.sql
 
 echo "==> [3/4] Waiting for the initial snapshot to land in ClickHouse"
 EXPECTED=$(( $(wc -l < source-init/sample-data.csv) - 1 ))
