@@ -1,0 +1,29 @@
+# Local-only archive of legacy demos/experiments (kept for context, never committed)
+_archive/
+
+# OS / editor cruft
+.DS_Store
+.idea/
+*.swp
+
+# Scratch / temp working dirs
+tmp/
+**/tmp/
+
+# Build artifacts
+build/
+seatbelt/bin/
+duckdb-seatbelt-extension/build/
+examples/**/bin/
+benchmarks/bin/
+
+# Example runtime data (docker volumes, generated state)
+examples/**/data/
+examples/**/.seatbelt/
+**/*.duckdb_extension
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
