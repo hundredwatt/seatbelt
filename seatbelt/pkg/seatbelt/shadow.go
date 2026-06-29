@@ -5,10 +5,17 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2" // Import the v2 DuckDB driver
 )
+
+// sqlLiteral escapes a string for safe interpolation inside a single-quoted SQL literal by doubling
+// embedded single quotes. Used for temp-file paths passed to DuckDB's read_csv().
+func sqlLiteral(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
 
 // DuckDB Configuration
 const (
@@ -263,9 +270,9 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, i
 			return fmt.Errorf("source extract scan and target scan are required for initial load")
 		}
 
-		createSourceExtractViewQuery := fmt.Sprintf(createSourceExtractViewSQLTemplate, data_files.SourceExtractScan.File.Name())
+		createSourceExtractViewQuery := fmt.Sprintf(createSourceExtractViewSQLTemplate, sqlLiteral(data_files.SourceExtractScan.File.Name()))
 
-		createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, data_files.TargetScan.File.Name())
+		createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, sqlLiteral(data_files.TargetScan.File.Name()))
 
 		for _, query := range []string{createSourceExtractViewQuery, createTargetViewQuery} {
 			_, err := db.ExecContext(ctx, query)
@@ -283,9 +290,9 @@ func createDataViews(ctx context.Context, db *sql.DB, data_files *DataFileSet, i
 	}
 
 	// Create VIEWs for the source, target, and incremental scans
-	createSourceViewQuery := fmt.Sprintf(createSourceViewSQLTemplate, data_files.SourceScan.File.Name())
-	createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, data_files.TargetScan.File.Name())
-	createIncrementalViewQuery := fmt.Sprintf(createIncrementalViewSQLTemplate, data_files.SourceChanges.File.Name())
+	createSourceViewQuery := fmt.Sprintf(createSourceViewSQLTemplate, sqlLiteral(data_files.SourceScan.File.Name()))
+	createTargetViewQuery := fmt.Sprintf(createTargetViewSQLTemplate, sqlLiteral(data_files.TargetScan.File.Name()))
+	createIncrementalViewQuery := fmt.Sprintf(createIncrementalViewSQLTemplate, sqlLiteral(data_files.SourceChanges.File.Name()))
 	createTemporaryNewShadowTableQuery := dropAndCreateShadowNewTableSQL
 
 	for _, query := range []string{createSourceViewQuery, createTargetViewQuery, createIncrementalViewQuery, createTemporaryNewShadowTableQuery} {

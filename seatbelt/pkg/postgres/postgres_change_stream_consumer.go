@@ -53,12 +53,14 @@ type PostgresChangeStreamConsumer struct {
 
 const defaultIdleTimeout = 10 * time.Second // Reasonable default for production
 const defaultDebug = false
-const defaultSlotName = "seatbelt_test_slot"       // Placeholder
-const defaultPublicationName = "seatbelt_test_pub" // Placeholder
-const resultBatchSize = 4096                       // Batch size for writing results
+const defaultSlotName = "seatbelt_slot"
+const defaultPublicationName = "seatbelt_pub"
+const resultBatchSize = 4096 // Batch size for writing results
 
-// NewPostgresChangeStreamConsumer creates a new consumer for a specific table and starts processing changes.
-func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, table seatbelt.Table /* Add config params here */) (*PostgresChangeStreamConsumer, error) {
+// NewPostgresChangeStreamConsumer creates a new consumer for a specific table and starts processing
+// changes. slotName and publicationName name the logical replication slot and publication to read
+// from; pass empty strings to fall back to the defaults ("seatbelt_slot" / "seatbelt_pub").
+func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, table seatbelt.Table, slotName, publicationName string) (*PostgresChangeStreamConsumer, error) {
 	consumerCtx, consumerCancel := context.WithCancel(ctx) // Create cancellable context for the consumer
 
 	// --- Standard Connection Setup ---
@@ -98,11 +100,14 @@ func NewPostgresChangeStreamConsumer(ctx context.Context, connString string, tab
 	}
 	slog.Debug("Established replication connection.")
 
-	// TODO: Get these from config
 	idleTimeout := defaultIdleTimeout
 	debug := defaultDebug
-	slotName := defaultSlotName
-	publicationName := defaultPublicationName
+	if slotName == "" {
+		slotName = defaultSlotName
+	}
+	if publicationName == "" {
+		publicationName = defaultPublicationName
+	}
 
 	c := &PostgresChangeStreamConsumer{
 		// Connections & Config
@@ -583,6 +588,15 @@ func (c *PostgresChangeStreamConsumer) openDataFile() error {
 	return nil
 }
 
+// csvEscapeField quotes a CSV field per RFC4180 when it contains a comma, double-quote, newline, or
+// carriage return, doubling any embedded quotes. Plain values pass through unchanged.
+func csvEscapeField(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+	return s
+}
+
 // writeCurrentBatch writes the currently accumulated results (c.results) to the data file.
 // The mutex must be held by the caller.
 func (c *PostgresChangeStreamConsumer) writeCurrentBatch() error {
@@ -599,8 +613,9 @@ func (c *PostgresChangeStreamConsumer) writeCurrentBatch() error {
 
 	batchRowCount := 0
 	for pk, hashPair := range c.results {
-		// TODO: Need proper CSV escaping if PK contains commas, quotes, or newlines
-		row := fmt.Sprintf("%s,%s,%s\n", pk, hashPair.SourceHash.String(), hashPair.TargetHash.String())
+		// The hashes are numeric and never need escaping; the PK is RFC4180-escaped so values
+		// containing commas/quotes/newlines round-trip through DuckDB's read_csv.
+		row := fmt.Sprintf("%s,%s,%s\n", csvEscapeField(pk), hashPair.SourceHash.String(), hashPair.TargetHash.String())
 		if _, err := c.dataFile.File.WriteString(row); err != nil {
 			// Don't close the file here, let the main Close handle it.
 			// Return an error indicating which row failed.

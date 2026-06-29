@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"seatbelt/pkg/seatbelt"
@@ -18,11 +19,57 @@ import (
 const postgresDatabaseName = "postgres"
 
 type PostgresSource struct {
-	conn *pgxpool.Pool
+	conn            *pgxpool.Pool
+	slotName        string
+	publicationName string
 }
 
-func NewPostgresSource(conn *pgxpool.Pool) *PostgresSource {
-	return &PostgresSource{conn: conn}
+// PostgresSourceOption configures optional behavior of a PostgresSource.
+type PostgresSourceOption func(*PostgresSource)
+
+// WithReplicationSlot sets the logical replication slot and publication used by the change stream
+// consumer. Either value may be empty to keep the default.
+func WithReplicationSlot(slotName, publicationName string) PostgresSourceOption {
+	return func(s *PostgresSource) {
+		if slotName != "" {
+			s.slotName = slotName
+		}
+		if publicationName != "" {
+			s.publicationName = publicationName
+		}
+	}
+}
+
+// NewPostgresSource creates a PostgreSQL source. The replication slot/publication names default to
+// "seatbelt_slot" / "seatbelt_pub", can be overridden via the SEATBELT_SLOT_NAME /
+// SEATBELT_PUBLICATION_NAME environment variables, and finally via WithReplicationSlot options
+// (highest precedence).
+func NewPostgresSource(conn *pgxpool.Pool, opts ...PostgresSourceOption) *PostgresSource {
+	s := &PostgresSource{conn: conn}
+	if v := os.Getenv("SEATBELT_SLOT_NAME"); v != "" {
+		s.slotName = v
+	}
+	if v := os.Getenv("SEATBELT_PUBLICATION_NAME"); v != "" {
+		s.publicationName = v
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// parallelWorkers reads and validates a worker-count environment variable, falling back to def when
+// unset. It rejects non-numeric values to avoid interpolating untrusted input into SET statements.
+func parallelWorkers(envVar, def string) (string, error) {
+	v := os.Getenv(envVar)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return "", fmt.Errorf("%s must be a non-negative integer, got %q", envVar, v)
+	}
+	return strconv.Itoa(n), nil
 }
 
 func (s *PostgresSource) DataSize(ctx context.Context, table seatbelt.Table) (int64, error) {
@@ -51,6 +98,14 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	// Clean up the temp file on any error path; cleared once we hand the file to the caller.
+	success := false
+	defer func() {
+		if !success {
+			osfile.Close()
+			os.Remove(osfile.Name())
+		}
+	}()
 
 	// Split schema and table to sanitize properly
 	var safeFullTableName string
@@ -65,9 +120,9 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		safeFullTableName = pgx.Identifier{table.Name()}.Sanitize()
 	}
 
-	threads := os.Getenv("SEATBELT_POSTGRES_THREADS")
-	if threads == "" {
-		threads = "1"
+	threads, err := parallelWorkers("SEATBELT_POSTGRES_THREADS", "1")
+	if err != nil {
+		return nil, err
 	}
 
 	// Get a connection from the pool
@@ -124,6 +179,7 @@ func (s *PostgresSource) Scan(ctx context.Context, table seatbelt.Table) (*seatb
 		return nil, fmt.Errorf("error resetting file pointer: %w", err)
 	}
 
+	success = true
 	return file, nil
 }
 
@@ -134,6 +190,14 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	// Clean up the temp file on any error path; cleared once we hand the file to the caller.
+	success := false
+	defer func() {
+		if !success {
+			osfile.Close()
+			os.Remove(osfile.Name())
+		}
+	}()
 	bufferedWriter := bufio.NewWriter(osfile)
 
 	// Write header using the buffered writer
@@ -181,8 +245,6 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		// Write line using the buffered writer
 		_, err = bufferedWriter.WriteString(fmt.Sprintf("%v,%s,%s\n", pk_val, source_row_hash, target_row_hash))
 		if err != nil {
-			// It's generally good to close the file or cleanup temp file on error here,
-			// but sticking to minimal changes for the buffering logic.
 			return nil, fmt.Errorf("failed to write line to buffer: %w", err)
 		}
 	}
@@ -201,14 +263,11 @@ func (s *PostgresSource) ExtractScan(ctx context.Context, table seatbelt.Table) 
 		return nil, fmt.Errorf("error resetting file pointer: %w", err)
 	}
 
+	success = true
 	return file, nil
 }
 
 func (s *PostgresSource) StartChangeStreamConsumer(ctx context.Context, table seatbelt.Table) (seatbelt.ChangeStreamConsumer, error) {
-	// TODO: Get replication-specific config (slot name, publication name, idle timeout, debug flag)
-	// from somewhere (e.g., a config object passed to NewPostgresSource or environment variables).
-	// For now, the consumer uses hardcoded defaults.
-
 	// Get the base connection string from the pool's configuration.
 	// The consumer will modify it to add replication parameters.
 	connString := s.conn.Config().ConnConfig.ConnString()
@@ -219,7 +278,8 @@ func (s *PostgresSource) StartChangeStreamConsumer(ctx context.Context, table se
 		return nil, fmt.Errorf("connection string not available in pool config")
 	}
 
-	consumer, err := NewPostgresChangeStreamConsumer(ctx, connString, table /* Add other config params */)
+	// Empty names let the consumer apply its defaults ("seatbelt_slot" / "seatbelt_pub").
+	consumer, err := NewPostgresChangeStreamConsumer(ctx, connString, table, s.slotName, s.publicationName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create postgres change stream consumer: %w", err)
 	}
@@ -234,6 +294,14 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	// Clean up the temp file on any error path; cleared once we hand the file to the caller.
+	success := false
+	defer func() {
+		if !success {
+			osfile.Close()
+			os.Remove(osfile.Name())
+		}
+	}()
 
 	// Split schema and table to sanitize properly
 	var safeFullTableName string
@@ -305,6 +373,7 @@ func (s *PostgresSource) InspectScan(ctx context.Context, table seatbelt.Table, 
 		return nil, fmt.Errorf("error resetting file pointer: %w", err)
 	}
 
+	success = true
 	return file, nil
 }
 
@@ -315,6 +384,14 @@ func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.
 		return nil, err
 	}
 	file := seatbelt.NewDataFile(osfile)
+	// Clean up the temp file on any error path; cleared once we hand the file to the caller.
+	success := false
+	defer func() {
+		if !success {
+			osfile.Close()
+			os.Remove(osfile.Name())
+		}
+	}()
 
 	// Write header
 	file.WriteHeaderLine("pk,source_hash,target_hash,source_text,target_text")
@@ -390,6 +467,7 @@ func (s *PostgresSource) InspectExtractScan(ctx context.Context, table seatbelt.
 		return nil, fmt.Errorf("error resetting file pointer: %w", err)
 	}
 
+	success = true
 	return file, nil
 }
 

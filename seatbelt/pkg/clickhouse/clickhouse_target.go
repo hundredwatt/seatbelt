@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"seatbelt/pkg/seatbelt"
@@ -79,10 +80,14 @@ func (t *ClickHouseTarget) Scan(ctx context.Context, table seatbelt.Table) (*sea
 		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
 
-	// Set max_threads
+	// Set max_threads. Validate as an integer so the env value can't inject into the SET statement.
 	threads := os.Getenv("SEATBELT_CLICKHOUSE_THREADS")
 	if threads == "" {
 		threads = "4"
+	} else if n, convErr := strconv.Atoi(strings.TrimSpace(threads)); convErr != nil || n < 1 {
+		return nil, fmt.Errorf("SEATBELT_CLICKHOUSE_THREADS must be a positive integer, got %q", threads)
+	} else {
+		threads = strconv.Itoa(n)
 	}
 	_, err = t.conn.ExecContext(ctx, fmt.Sprintf("SET max_threads = %s", threads))
 	if err != nil {
