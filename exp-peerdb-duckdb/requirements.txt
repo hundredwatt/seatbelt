@@ -1,3 +1,0 @@
--e ../pyseatbelt-duckdb/
-duckdb
-pandas
