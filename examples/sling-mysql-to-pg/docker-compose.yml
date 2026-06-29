@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: seatbelt_sling_mysql
+    ports:
+      - "55820:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: shop
+      MYSQL_USER: sling
+      MYSQL_PASSWORD: slingpw
+    # local-infile=1 lets run.sh load seed/products.csv via LOAD DATA LOCAL INFILE.
+    command: --local-infile=1
+    volumes:
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpw"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:16
+    container_name: seatbelt_sling_postgres
+    ports:
+      - "55821:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shop
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot Sling job (full-refresh MySQL -> Postgres). Started explicitly by run.sh:
+  #   docker compose run --rm sling
+  sling:
+    image: slingdata/sling:latest
+    profiles: ["tools"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./sling:/sling
+    command: ["run", "-r", "/sling/replication.yml"]

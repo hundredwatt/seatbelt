@@ -1,0 +1,14 @@
+# Sling full-refresh replication: MySQL shop.products -> Postgres public.products.
+# Host names are the docker-compose service names (this runs inside the compose network).
+source: 'mysql://sling:slingpw@mysql:3306/shop'
+target: 'postgresql://postgres:postgres@postgres:5432/shop?sslmode=disable'
+
+defaults:
+  mode: full-refresh
+  object: 'public.{stream_table}'
+
+streams:
+  shop.products:
+
+env:
+  SLING_THREADS: 1

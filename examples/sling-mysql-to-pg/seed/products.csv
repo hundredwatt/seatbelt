@@ -1,0 +1,11 @@
+id,sku,name,category,quantity
+1,SKU-0001,Aluminum Water Bottle,Outdoors,120
+2,SKU-0002,Wool Hiking Socks,Apparel,300
+3,SKU-0003,Trail Running Shoes,Footwear,85
+4,SKU-0004,Insulated Travel Mug,Kitchen,210
+5,SKU-0005,Carbon Trekking Poles,Outdoors,40
+6,SKU-0006,Merino Base Layer,Apparel,150
+7,SKU-0007,Quick-Dry Towel,Travel,500
+8,SKU-0008,Headlamp 400lm,Lighting,95
+9,SKU-0009,Stainless Cutlery Set,Kitchen,60
+10,SKU-0010,Packable Rain Jacket,Apparel,75
