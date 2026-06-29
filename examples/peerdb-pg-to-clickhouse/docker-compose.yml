@@ -1,0 +1,186 @@
+name: seatbelt-peerdb-example
+
+# A trimmed PeerDB control plane (catalog + temporal + flow workers + server + minio) plus the two
+# databases this example actually validates: a source Postgres and a ClickHouse destination.
+# Adapted from github.com/PeerDB-io/peerdb docker-compose.yml (UIs and extra tooling removed).
+
+x-minio-config: &minio-config
+  PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_ACCESS_KEY_ID: _peerdb_minioadmin
+  PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_SECRET_ACCESS_KEY: _peerdb_minioadmin
+  PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_REGION: us-east-1
+  PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_ENDPOINT_URL_S3: http://minio:9000
+  PEERDB_CLICKHOUSE_AWS_S3_BUCKET_NAME: peerdbbucket
+
+x-catalog-config: &catalog-config
+  PEERDB_CATALOG_HOST: catalog
+  PEERDB_CATALOG_PORT: 5432
+  PEERDB_CATALOG_USER: postgres
+  PEERDB_CATALOG_PASSWORD: postgres
+  PEERDB_CATALOG_DATABASE: postgres
+
+x-flow-worker-env: &flow-worker-env
+  TEMPORAL_HOST_PORT: temporal:7233
+  PEERDB_TEMPORAL_NAMESPACE: default
+
+services:
+  # --- The two databases this example validates ------------------------------------------------
+
+  source-postgres:
+    image: postgres:17-alpine
+    container_name: seatbelt_peerdb_source
+    command: -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10
+    ports:
+      - "55831:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: source
+    volumes:
+      - ./source-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.4
+    container_name: seatbelt_peerdb_clickhouse
+    ports:
+      - "9100:9000"
+      - "8223:8123"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: pass
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- PeerDB control plane --------------------------------------------------------------------
+
+  catalog:
+    container_name: seatbelt_peerdb_catalog
+    image: postgres:17-alpine
+    command: -c config_file=/etc/postgresql.conf
+    ports:
+      - "9901:5432"
+    environment:
+      PGUSER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: --locale=C.UTF-8
+    volumes:
+      - ./peerdb-config/postgresql.conf:/etc/postgresql.conf
+      - ./peerdb-config/initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "postgres", "-U", "postgres"]
+      interval: 10s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+
+  temporal:
+    container_name: seatbelt_peerdb_temporal
+    depends_on:
+      catalog:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PWD=postgres
+      - POSTGRES_SEEDS=catalog
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    image: temporalio/auto-setup:1.27
+    volumes:
+      - ./peerdb-config/temporal-dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-admin-tools:
+    container_name: seatbelt_peerdb_temporal_admin
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+    image: temporalio/admin-tools:1.25.2-tctl-1.18.1-cli-1.1.1
+    stdin_open: true
+    tty: true
+    entrypoint: /etc/temporal/entrypoint.sh
+    healthcheck:
+      test: ["CMD", "tctl", "workflow", "list"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ./peerdb-config/mirror-name-search.sh:/etc/temporal/entrypoint.sh
+
+  flow-api:
+    container_name: seatbelt_peerdb_flow_api
+    image: ghcr.io/peerdb-io/flow-api:stable-v0.27.8
+    ports:
+      - "8112:8112"
+      - "8113:8113"
+    environment:
+      <<: [*catalog-config, *flow-worker-env, *minio-config]
+    depends_on:
+      temporal-admin-tools:
+        condition: service_healthy
+
+  flow-snapshot-worker:
+    container_name: seatbelt_peerdb_flow_snapshot
+    image: ghcr.io/peerdb-io/flow-snapshot-worker:stable-v0.27.8
+    environment:
+      <<: [*catalog-config, *flow-worker-env, *minio-config]
+    depends_on:
+      temporal-admin-tools:
+        condition: service_healthy
+
+  flow-worker:
+    container_name: seatbelt_peerdb_flow_worker
+    image: ghcr.io/peerdb-io/flow-worker:stable-v0.27.8
+    environment:
+      <<: [*catalog-config, *flow-worker-env, *minio-config]
+    depends_on:
+      temporal-admin-tools:
+        condition: service_healthy
+
+  peerdb:
+    container_name: seatbelt_peerdb_server
+    stop_signal: SIGINT
+    image: ghcr.io/peerdb-io/peerdb-server:stable-v0.27.8
+    environment:
+      <<: *catalog-config
+      PEERDB_FLOW_SERVER_ADDRESS: grpc://flow-api:8112
+      RUST_LOG: info
+    ports:
+      - "9900:9900"
+    depends_on:
+      catalog:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: seatbelt_peerdb_minio
+    ports:
+      - "9011:9000"
+    environment:
+      <<: *minio-config
+    entrypoint: >
+      /bin/sh -c "
+      export MINIO_ROOT_USER=$$PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_ACCESS_KEY_ID;
+      export MINIO_ROOT_PASSWORD=$$PEERDB_CLICKHOUSE_AWS_CREDENTIALS_AWS_SECRET_ACCESS_KEY;
+      minio server /data &
+      sleep 3;
+      /usr/bin/mc alias set m http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
+      /usr/bin/mc mb -p m/$$PEERDB_CLICKHOUSE_AWS_S3_BUCKET_NAME;
+      wait
+      "
+
+networks:
+  default:
+    name: seatbelt_peerdb_network

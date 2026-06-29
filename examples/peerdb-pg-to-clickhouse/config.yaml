@@ -1,0 +1,27 @@
+# Seatbelt validation config for the PeerDB Postgres -> ClickHouse example.
+# Source = Postgres, Target = ClickHouse. The "peer_db" row mapper is the WASM mapper that knows how
+# PeerDB represents Postgres rows in ClickHouse (JSON canonicalization, type conversions, the
+# _peerdb_is_deleted soft-delete column, etc.).
+
+source_connection_string: "postgres://postgres:postgres@localhost:55831/source"
+target_connection_string: "clickhouse://default:pass@localhost:9100/default?dial_timeout=5s&read_timeout=60s&password=pass"
+
+row_mapper_name: "peer_db"
+
+table_name: "public.events"
+target_table_name: "default.events"
+primary_key_name: "id"
+
+columns:
+  - {name: user_id,     source_type: integer,                     target_type: Int32}
+  - {name: name,        source_type: character varying,           target_type: String}
+  - {name: email,       source_type: character varying,           target_type: String}
+  - {name: status,      source_type: character varying,           target_type: String}
+  - {name: created_at,  source_type: timestamp without time zone, target_type: DateTime64(6)}
+  - {name: score,       source_type: numeric,                     target_type: Decimal(10,2)}
+  - {name: description, source_type: text,                        target_type: String}
+  - {name: config,      source_type: jsonb,                       target_type: String}
+
+seatbelt_data_path: "tmp/shadow.db"
+environment:
+  SEATBELT_TEMP_DIR: "tmp/"
