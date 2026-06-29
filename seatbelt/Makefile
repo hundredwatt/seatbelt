@@ -21,6 +21,14 @@ clickhouse-client:
 test:
 	go test -v ./...
 
+## WASM row mapper
+# Build the reference Zig mapper (wasm-mappers/peerdb) and vendor the artifact
+# into the Go package for //go:embed. Requires Zig 0.16+.
+.PHONY: wasm
+wasm:
+	cd ../wasm-mappers/peerdb && zig build
+	cp ../wasm-mappers/peerdb/zig-out/bin/peerdb.wasm pkg/row_mappers/peerdb.wasm
+
 ## Build/Install
 # We don't really need this, as we can use `go run cmd/seatbelt/main.go` to run the program for development.
 build: ensure-build-dir

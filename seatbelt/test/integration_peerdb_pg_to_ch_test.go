@@ -54,7 +54,7 @@ var table = &seatbelt.DefaultTable{
 	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(
 		&postgres.PostgresSourceHasher{TableDefinition: table_definition},
 		&clickhouse.ClickHouseTargetHasher{TableDefinition: table_definition},
-		row_mappers.NewPeerDBRowMapper(*table_definition),
+		mustWasmMapper(*table_definition),
 	),
 }
 
@@ -127,8 +127,18 @@ var json_table = &seatbelt.DefaultTable{
 	RowMapperAndHasher: seatbelt.NewDefaultRowMapperAndHasher(
 		&postgres.PostgresSourceHasher{TableDefinition: json_table_definition},
 		&clickhouse.ClickHouseTargetHasher{TableDefinition: json_table_definition},
-		row_mappers.NewPeerDBRowMapper(*json_table_definition),
+		mustWasmMapper(*json_table_definition),
 	),
+}
+
+// mustWasmMapper builds a WASM row mapper for package-level test fixtures,
+// panicking on error (the embedded module must always load).
+func mustWasmMapper(def seatbelt.TableDefinition) *row_mappers.WasmMapper {
+	m, err := row_mappers.NewWasmMapper(def)
+	if err != nil {
+		panic(err)
+	}
+	return m
 }
 
 func TestPeerDB_PG_To_CH_JSON(t *testing.T) {

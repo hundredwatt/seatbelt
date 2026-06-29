@@ -337,7 +337,11 @@ var benchSourceScanCmd = &cobra.Command{
 			slog.Error("Benchmark currently only supports 'peer_db' mapper")
 			os.Exit(1)
 		}
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
+		peerDbMapper, err := row_mappers.NewWasmMapper(tableDef)
+		if err != nil {
+			slog.Error("Error creating WASM row mapper", "error", err)
+			os.Exit(1)
+		}
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
 			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
@@ -398,7 +402,11 @@ var benchSourceExtractScanCmd = &cobra.Command{
 			slog.Error("Benchmark currently only supports 'peer_db' mapper")
 			os.Exit(1)
 		}
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
+		peerDbMapper, err := row_mappers.NewWasmMapper(tableDef)
+		if err != nil {
+			slog.Error("Error creating WASM row mapper", "error", err)
+			os.Exit(1)
+		}
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
 			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
@@ -459,7 +467,11 @@ var benchTargetScanCmd = &cobra.Command{
 			slog.Error("Benchmark currently only supports 'peer_db' mapper")
 			os.Exit(1)
 		}
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
+		peerDbMapper, err := row_mappers.NewWasmMapper(tableDef)
+		if err != nil {
+			slog.Error("Error creating WASM row mapper", "error", err)
+			os.Exit(1)
+		}
 		rowMapper := seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
 			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
@@ -555,7 +567,11 @@ var inspectCmd = &cobra.Command{
 			var rowMapper seatbelt.RowMapperAndHasher
 			switch cfg.RowMapperName {
 			case "peer_db":
-				peerDbMapper := row_mappers.NewPeerDBRowMapper(filteredTableDef)
+				peerDbMapper, err := row_mappers.NewWasmMapper(filteredTableDef)
+				if err != nil {
+					slog.Error("Error creating WASM row mapper", "error", err)
+					os.Exit(1)
+				}
 				rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
 					&postgres.PostgresSourceHasher{TableDefinition: &filteredTableDef},
 					&clickhouse.ClickHouseTargetHasher{TableDefinition: &filteredTableDef},
@@ -706,7 +722,12 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 	switch cfg.RowMapperName {
 	case "peer_db":
 		// Pass the determined database names
-		peerDbMapper := row_mappers.NewPeerDBRowMapper(tableDef)
+		peerDbMapper, err := row_mappers.NewWasmMapper(tableDef)
+		if err != nil {
+			sourceCleanup()
+			targetCleanup()
+			return nil, nil, nil, nil, nil, fmt.Errorf("create WASM row mapper: %w", err)
+		}
 		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
 			&postgres.PostgresSourceHasher{TableDefinition: &tableDef},
 			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
