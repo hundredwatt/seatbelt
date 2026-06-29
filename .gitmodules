@@ -1,6 +1,6 @@
 [submodule "duckdb"]
-	path = seatbelt-duckdb/duckdb
+	path = duckdb-seatbelt-extension/duckdb
 	url = https://github.com/duckdb/duckdb
 [submodule "extension-ci-tools"]
-	path = seatbelt-duckdb/extension-ci-tools
+	path = duckdb-seatbelt-extension/extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
