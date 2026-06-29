@@ -7,8 +7,9 @@ import (
 type DatabaseName string
 
 const (
-	POSTGRES DatabaseName = "postgres"
+	POSTGRES   DatabaseName = "postgres"
 	CLICKHOUSE DatabaseName = "clickhouse"
+	MYSQL      DatabaseName = "mysql"
 )
 
 func (d DatabaseName) String() string {

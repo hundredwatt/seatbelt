@@ -86,7 +86,7 @@ func TestPostgres_ConsumeChangeStream(t *testing.T) {
 	pool := setupTestDB(ctx, t)
 	defer pool.Close()
 
-	source := postgres.NewPostgresSource(pool)
+	source := postgres.NewPostgresSource(pool, postgres.WithReplicationSlot(testSlotName, testPublication))
 	consumer, err := source.StartChangeStreamConsumer(context.Background(), table)
 	if err != nil {
 		t.Fatalf("Failed to start change stream consumer: %v", err)

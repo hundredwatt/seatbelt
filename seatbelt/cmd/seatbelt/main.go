@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seatbelt/pkg/clickhouse"
+	"seatbelt/pkg/mysql"
 	"seatbelt/pkg/postgres"
 	"seatbelt/pkg/seatbelt" // Assuming seatbelt core logic is here
 
@@ -40,6 +41,13 @@ type AppConfig struct {
 	Columns                []seatbelt.ColumnMapping `yaml:"columns"`
 	ShadowPath             string                   `yaml:"seatbelt_data_path"` // Optional
 	Environment            map[string]string        `yaml:"environment"`        // Environment variables
+
+	// Optional logical-replication settings. When empty, Seatbelt defaults to the
+	// "seatbelt_slot" / "seatbelt_pub" slot and publication.
+	Replication struct {
+		SlotName        string `yaml:"slot_name"`
+		PublicationName string `yaml:"publication_name"`
+	} `yaml:"replication"`
 }
 
 var (
@@ -694,8 +702,8 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 
 	// --- Create Table Definition --- (Moved from createTable)
 	tableDef := seatbelt.TableDefinition{
-		SourceDatabase:  seatbelt.POSTGRES,
-		TargetDatabase:  seatbelt.CLICKHOUSE,
+		SourceDatabase:  databaseNameForScheme(schemeOf(cfg.SourceConnectionString)),
+		TargetDatabase:  databaseNameForScheme(schemeOf(cfg.TargetConnectionString)),
 		TableName:       cfg.TableName,
 		TargetTableName: cfg.TargetTableName,
 		PrimaryKeyName:  cfg.PrimaryKeyName,
@@ -733,6 +741,14 @@ func createComponents(ctx context.Context, cfg *AppConfig) (seatbelt.Source, sea
 			&clickhouse.ClickHouseTargetHasher{TableDefinition: &tableDef},
 			peerDbMapper,
 		)
+	case "generic":
+		// Identity mapper for pipelines that copy values without changing their text form
+		// (e.g. MySQL → Postgres via Sling for integer/string columns).
+		rowMapper = seatbelt.NewDefaultRowMapperAndHasher(
+			&mysql.MySQLSourceHasher{TableDefinition: &tableDef},
+			&postgres.PostgresTargetHasher{TableDefinition: &tableDef},
+			row_mappers.NewGenericRowMapper(),
+		)
 	default:
 		sourceCleanup()
 		targetCleanup()
@@ -765,40 +781,95 @@ func createTable(cfg *AppConfig) (seatbelt.TableDefinition, error) {
 	return tableDef, nil
 }
 
-// createSource creates just the source component based on config
+// createSource creates the source component, selecting the implementation from the connection-string
+// scheme (postgres:// or mysql://).
 func createSource(ctx context.Context, cfg *AppConfig) (seatbelt.Source, func(), error) {
-	// --- Create Source (PostgreSQL) ---
-	pgPool, err := pgxpool.New(ctx, cfg.SourceConnectionString)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to create postgres connection pool: %w", err)
-	}
-	if err := pgPool.Ping(ctx); err != nil {
-		pgPool.Close() // Close pool if ping fails
-		return nil, nil, fmt.Errorf("failed to ping postgres database: %w", err)
-	}
-	source := postgres.NewPostgresSource(pgPool)
-	sourceCleanup := func() { pgPool.Close() }
-	slog.Debug("PostgreSQL source connection established.")
+	switch schemeOf(cfg.SourceConnectionString) {
+	case "mysql":
+		dsn, err := mysql.DSNFromURL(cfg.SourceConnectionString)
+		if err != nil {
+			return nil, nil, err
+		}
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to open mysql connection: %w", err)
+		}
+		if err := db.PingContext(ctx); err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("failed to ping mysql database: %w", err)
+		}
+		slog.Debug("MySQL source connection established.")
+		return mysql.NewMySQLSource(db), func() { db.Close() }, nil
 
-	return source, sourceCleanup, nil
+	case "postgres", "postgresql":
+		pgPool, err := pgxpool.New(ctx, cfg.SourceConnectionString)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to create postgres connection pool: %w", err)
+		}
+		if err := pgPool.Ping(ctx); err != nil {
+			pgPool.Close() // Close pool if ping fails
+			return nil, nil, fmt.Errorf("failed to ping postgres database: %w", err)
+		}
+		source := postgres.NewPostgresSource(pgPool, postgres.WithReplicationSlot(cfg.Replication.SlotName, cfg.Replication.PublicationName))
+		slog.Debug("PostgreSQL source connection established.")
+		return source, func() { pgPool.Close() }, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported source connection scheme in %q (expected postgres:// or mysql://)", cfg.SourceConnectionString)
+	}
 }
 
-// createTarget creates just the target component based on config
-func createTarget(ctx context.Context, cfg *AppConfig) (seatbelt.Target, func(), error) {
-	// --- Create Target (ClickHouse) ---
-	chDB, err := sql.Open("clickhouse", cfg.TargetConnectionString)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to open clickhouse connection: %w", err)
+// schemeOf returns the lowercase URL scheme of a connection string, or "" if none.
+func schemeOf(connString string) string {
+	if i := strings.Index(connString, "://"); i > 0 {
+		return strings.ToLower(connString[:i])
 	}
-	if err := chDB.PingContext(ctx); err != nil {
-		chDB.Close()
-		return nil, nil, fmt.Errorf("failed to ping clickhouse database: %w", err)
-	}
-	target := clickhouse.NewClickHouseTarget(chDB)
-	targetCleanup := func() { chDB.Close() }
-	slog.Debug("ClickHouse target connection established.")
+	return ""
+}
 
-	return target, targetCleanup, nil
+// databaseNameForScheme maps a connection-string scheme to the typesystem DatabaseName.
+func databaseNameForScheme(scheme string) seatbelt.DatabaseName {
+	switch scheme {
+	case "mysql":
+		return seatbelt.MYSQL
+	case "clickhouse":
+		return seatbelt.CLICKHOUSE
+	default: // postgres, postgresql
+		return seatbelt.POSTGRES
+	}
+}
+
+// createTarget creates the target component, selecting the implementation from the connection-string
+// scheme (clickhouse:// or postgres://).
+func createTarget(ctx context.Context, cfg *AppConfig) (seatbelt.Target, func(), error) {
+	switch schemeOf(cfg.TargetConnectionString) {
+	case "postgres", "postgresql":
+		pgPool, err := pgxpool.New(ctx, cfg.TargetConnectionString)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to create postgres target pool: %w", err)
+		}
+		if err := pgPool.Ping(ctx); err != nil {
+			pgPool.Close()
+			return nil, nil, fmt.Errorf("failed to ping postgres target: %w", err)
+		}
+		slog.Debug("PostgreSQL target connection established.")
+		return postgres.NewPostgresTarget(pgPool), func() { pgPool.Close() }, nil
+
+	case "clickhouse":
+		chDB, err := sql.Open("clickhouse", cfg.TargetConnectionString)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to open clickhouse connection: %w", err)
+		}
+		if err := chDB.PingContext(ctx); err != nil {
+			chDB.Close()
+			return nil, nil, fmt.Errorf("failed to ping clickhouse database: %w", err)
+		}
+		slog.Debug("ClickHouse target connection established.")
+		return clickhouse.NewClickHouseTarget(chDB), func() { chDB.Close() }, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported target connection scheme in %q (expected clickhouse:// or postgres://)", cfg.TargetConnectionString)
+	}
 }
 
 func humanize(n int64) string {
