@@ -38,12 +38,14 @@ Measured on the reference schema (~933 bytes/row), local PostgreSQL 17, Apple Si
 
 | Table | Size | Rows | Transferred from source | % of table | Wall time |
 |-------|------|------|-------------------------|-----------|-----------|
-| `dataset1gb`  | 1.0 GB | 1.15 M | 33 MB  | **3.14 %** | 3.0 s |
-| `dataset10gb` | 10 GB  | 11.5 M | 323 MB | **3.14 %** | 8.0 s |
+| `dataset1gb`   | 1.0 GB | 1.15 M  | 33 MB  | **3.14 %** | 1 s |
+| `dataset10gb`  | 10 GB  | 11.5 M  | 323 MB | **3.14 %** | 8 s |
+| `dataset100gb` | 103 GB | 118 M   | 3.3 GB | **3.19 %** | 247 s |
 
-To validate a table, Seatbelt reads ~**3 %** of its size from the source — a constant ratio (one
-fixed-width hash per row), so it scales linearly and predictably. A 10× larger table costs ~10× the
-(small) bytes, not a full re-read.
+To validate a table, Seatbelt reads ~**3 %** of its size from the source — a near-constant ratio (one
+fixed-width hash per row), so it scales linearly and predictably. A 100× larger table costs ~100× the
+(small) bytes, not a full re-read. (Measured idle; wall time is dominated by the source's sequential
+scan of the table.)
 
 ### Full pipeline (Postgres → ClickHouse via PeerDB)
 

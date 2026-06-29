@@ -112,8 +112,9 @@ costs a small, constant fraction of its size:
 
 | Table | Size | Transferred from source | % of table | Wall time |
 |-------|------|-------------------------|-----------|-----------|
-| 1 GB  | 1.0 GB | 33 MB  | **3.14 %** | 3.0 s |
-| 10 GB | 10 GB  | 323 MB | **3.14 %** | 8.0 s |
+| 1 GB   | 1.0 GB | 33 MB  | **3.14 %** | 1 s |
+| 10 GB  | 10 GB  | 323 MB | **3.14 %** | 8 s |
+| 100 GB | 103 GB | 3.3 GB | **3.19 %** | 247 s |
 
 A real PeerDB Postgres → ClickHouse pipeline (4 GB, 3.2 M rows, including a JSON column) validated
 end-to-end with the destination scan reading just **2.6 %** of the table's size. Full methodology and a
