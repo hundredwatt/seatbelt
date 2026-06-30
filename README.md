@@ -54,6 +54,39 @@ change log (logical replication / WAL) and verifies that picture against the des
 reads the source table directly when it needs to (on a schedule or on demand) so the steady-state
 load on the source is a continuous tail of the change stream rather than repeated full scans.
 
+```mermaid
+flowchart LR
+    SRC[("Source DB<br/>(Postgres)")]
+    DST[("Destination DB<br/>(ClickHouse / PG)")]
+
+    SRC -->|"primary CDC pipeline — under test"| DST
+
+    subgraph SEATBELT["Seatbelt — shadow database (DuckDB)"]
+        CONSUMER["Change-log consumer"]
+        DCV["Data Change Validation<br/>tracks INSERT / UPDATE / DELETE per primary key"]
+        HT["Hash Triangulation (optional)<br/>source_hash → destination_hash map"]
+        CONSUMER --> DCV
+        CONSUMER --> HT
+    end
+
+    SRC -.->|"change log (WAL / logical replication)"| CONSUMER
+    DST -.->|"observed operations"| DCV
+    DST -.->|"destination hash"| HT
+    SRC -.->|"on-demand hash scan"| HT
+    MAPPER["WASM row mapper<br/>reproduces pipeline transforms"] -.-> HT
+
+    DCV --> RESULT["Validation results<br/>Pending → Error"]
+    HT --> RESULT
+
+    classDef optional stroke-dasharray: 5 5;
+    class HT,MAPPER optional;
+```
+
+Solid arrows are the pipeline under test; dashed arrows are what Seatbelt observes. **Data Change
+Validation** runs off the change stream alone and needs no value comparison; **Hash Triangulation** is
+the optional, dashed-bordered layer that adds a full per-column audit, pulling an on-demand source hash
+scan and a WASM row mapper into the picture.
+
 ### Data Change Validation — handle live, in-flight changes
 
 Instead of comparing values, Seatbelt watches how data **moves**. Every INSERT / UPDATE / DELETE on a
