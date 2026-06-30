@@ -137,8 +137,9 @@ Each example's `README.md` has the full walkthrough and the expected output.
 
 ## Benchmarks
 
-Seatbelt reads only **one hash per row** from the source — never the row data — so validating a table
-costs a small, constant fraction of its size:
+Hash Triangulation allows us to choose source hash functions for efficiency instead of needing a
+universal like MD5. In Postgres we can use the non-cryptographic, internal `hashtextextended` to
+perform very fast verification scans with tiny network transfer:
 
 | Table | Size | Transferred from source | % of table | Wall time |
 |-------|------|-------------------------|-----------|-----------|
@@ -146,9 +147,7 @@ costs a small, constant fraction of its size:
 | 10 GB  | 10 GB  | 323 MB | **3.14 %** | 8 s |
 | 100 GB | 103 GB | 3.3 GB | **3.19 %** | 247 s |
 
-A real PeerDB Postgres → ClickHouse pipeline (4 GB, 3.2 M rows, including a JSON column) validated
-end-to-end with the destination scan reading just **2.6 %** of the table's size. Full methodology and a
-reproducible harness in [`benchmarks/`](./benchmarks).
+Full methodology and a reproducible harness in [`benchmarks/`](./benchmarks).
 
 ## Documentation
 
