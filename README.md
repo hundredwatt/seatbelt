@@ -174,11 +174,11 @@ Hash Triangulation allows us to choose source hash functions for efficiency inst
 universal like MD5. In Postgres we can use the non-cryptographic, internal `hashtextextended` to
 perform very fast verification scans with tiny network transfer:
 
-| Table | Size | Transferred from source | % of table | Wall time |
-|-------|------|-------------------------|-----------|-----------|
-| 1 GB   | 1.0 GB | 33 MB  | **3.14 %** | 1 s |
-| 10 GB  | 10 GB  | 323 MB | **3.14 %** | 8 s |
-| 100 GB | 103 GB | 3.3 GB | **3.19 %** | 247 s |
+| Table | Transferred from source | % of table | Wall time | Scan rate |
+|-------|-------------------------|-----------|-----------|-----------|
+| 1 GB   | 33 MB  | **3.14 %** | 1 s | - |
+| 10 GB  | 323 MB | **3.14 %** | 8 s | - |
+| 100 GB | 3.3 GB | **3.19 %** | 247 s | 417 MB/s |
 
 Full methodology and a reproducible harness in [`benchmarks/`](./benchmarks).
 
