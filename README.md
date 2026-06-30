@@ -4,75 +4,105 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Seatbelt verifies that a change-data-capture pipeline (Postgres → ClickHouse via PeerDB,
-MySQL → Postgres via Sling, etc.) is actually moving your data correctly — across *all* rows and
-columns, while the source keeps changing, without hammering the source database.
-
-It does this with two primitives:
-
-- **Data Change Validation** — detects a broad class of pipeline failures (missing rows, missing
-  updates, extra rows, duplicates) by tracking row-level *operations* over time. No per-table or
-  per-column configuration.
-- **Hash Triangulation** — a full source-to-destination comparison of every row and column, computed
-  asynchronously from the source's change log so it tolerates in-flight changes and pipeline
-  transformations, with minimal load on the source.
-
-> Seatbelt didn't make it as a commercial product. It's open source (MIT) so the techniques don't die
-> with the company. If you run data pipelines, the ideas here are worth stealing.
+Seatbelt continuously verifies that a change-data-capture pipeline is actually moving your data
+correctly. It verifies every row and column with no noise from false-positive alerts, while the source
+keeps changing, and without hammering the source database.
 
 ---
 
-## The problem: you can't just hash both sides and compare
+## Why end-to-end data validation is hard
 
-The obvious way to test a pipeline is to hash each source row, hash the corresponding destination row,
-and compare. In practice this almost never works on a live pipeline, even when replication is
-perfectly correct:
+Most teams "validate" a pipeline by spot-checking row counts or sampling a few rows, because doing it
+properly runs into a wall of problems:
 
-- **JSON columns** — `MD5(json::text)` differs between source and destination because JSON
-  serialization doesn't guarantee key ordering.
-- **Lossy type conversions** — floating-point truncation, timestamp precision, numeric widening, etc.
-- **Live changes** — the source row changed and the change hasn't propagated yet, so a point-in-time
-  comparison sees a "mismatch" that isn't one.
+- **Limited coverage:** count checks and sampling miss failures that matter, such as: a dropped update
+  on one row, a value silently mangled by a type conversion, a handful of phantom rows. You only catch
+  what you happen to look at.
+- **Slow and resource-hungry on the source:** a real full-table comparison re-reads the entire source
+  table, competing with production traffic on the database you least want to load. It usually only
+  gets run infrequently or when someone reports a problem.
+- **Noisy:** on a live pipeline the source is always changing and the destination lags behind.
+  A point-in-time comparison constantly reports "mismatches" that are really just replication lag and
+  resolve themselves moments later. This leads to alert fatigue on your team and they miss actual
+  problems. 
+- **Complex and configuration-heavy:** per-table, per-column rules; allowlists for which columns to
+  compare; special cases for every type. The validator becomes its own pipeline to maintain.
+- **Can't survive transformations:** you can't just hash both sides and compare. JSON re-serializes
+  with different key ordering, floats truncate, timestamps lose precision, integers widen or become
+  strings. This is why `source_hash == destination_hash` is false even when the data is perfectly correct.
 
-Seatbelt started from a different question: *assume you can never get a clean row-for-row comparison
-between source and destination — can you still comprehensively test a live pipeline?*
+The last two problems compound on a live pipeline: the data is being reshaped in flight _and_ the
+source keeps moving, so by the time you've read it, it has already changed. Seatbelt starts from the
+premise that a clean row-for-row comparison between source and destination is never available; and
+then asks whether you can comprehensively test a live pipeline anyway. You can.
 
-## Data Change Validation
+## How Seatbelt works
 
-Instead of comparing values, watch how data **moves**. Every INSERT/UPDATE/DELETE on a source row
-should produce an equivalent operation on a destination row — regardless of what the values are or how
-they were transformed. From that single invariant, Seatbelt asserts:
+Seatbelt does its reconciliation in an embedded shadow database that sits beside the
+pipeline. Per primary key, the shadow tracks the latest source and destination signatures and the
+operation each side has seen. Two ideas make this work on live data:
 
-At the **table** level:
-- No source rows missing from the destination
-- No destination rows missing from the source
-- Row counts match (after accounting for replication lag)
+1. **Data Change Validation:** without verifying the underlying data values, we can use the signatures
+   to determine how the row is changing at the source to identify in-flight data and ensure the
+   destination (eventaully) changed with a matching operation.
+2. **Hash Triangulation:** rather than expecting a source hash to equal a destination hash (impossible
+   once the pipeline transforms the data) the source and destination keep separate hash domains that
+   are reconciled through a map built in the change log consumer.
 
-At the **row** level:
-- Every DML operation on a source row produces an equivalent operation on the destination
+By default the shadow database stays cheap: it builds its picture of the source from the source's
+change log (logical replication / WAL) and verifies that picture against the destination. It only
+reads the source table directly when it needs to (on a schedule or on demand) so the steady-state
+load on the source is a continuous tail of the change stream rather than repeated full scans.
 
-It needs **zero** per-table or per-column setup. The operation model and the exact failure-detection
-rules live in [`change-validation-core/`](./change-validation-core) as an executable reference spec
-that the Go program and the DuckDB extension both implement.
+### Data Change Validation — handle live, in-flight changes
 
-## Hash Triangulation
+Instead of comparing values, Seatbelt watches how data **moves**. Every INSERT / UPDATE / DELETE on a
+source row should produce an equivalent operation on the corresponding destination row — regardless of
+what the values are or how they were transformed. From that one invariant, with **zero** per-table or
+per-column configuration, Seatbelt asserts:
 
-To answer "does the source match the destination *exactly*?" Seatbelt avoids the broken approach of
-expecting `source_hash == destination_hash`. Instead it builds a map of
-`source_hash → destination_hash` for every row, computed **asynchronously from the source change log**
-(where the pipeline's transformations can be reproduced once, in one place). Then:
+- No source rows missing from the destination, and no destination rows missing from the source
+- Row counts match, once replication lag is accounted for
+- Every DML operation on a source row produced an equivalent operation on the destination — catching
+  dropped updates, missing rows, phantom rows, duplicates, and un-replicated deletes
 
-1. Use Data Change Validation to isolate the *static* rows (filtering out live churn and anything
+The trick to surviving live data is **two cycles**. A single snapshot can't tell "this row is
+permanently wrong" apart from "this change just hasn't arrived yet." So a discrepancy first surfaces as
+**Pending**, and is only promoted to an **Error** once Seatbelt has watched the row *settle*: it
+changed on the source, and then — a beat later — changed equivalently on the destination. Between two
+Seatbelt checks the **primary pipeline must catch up** and propagate those in-flight changes; the
+second cycle is what proves a Pending discrepancy was just lag (now reconciled) or a genuine failure
+(still unreconciled). This is why a live change stream matters — a one-shot batch run can flag Pending
+rows but can't confirm Errors on its own.
+
+The operation model and the exact failure-detection rules live in
+[`change-validation-core/`](./change-validation-core) as an executable reference spec that the Go
+program and the DuckDB extension both implement.
+
+### Hash Triangulation — a full audit that survives transformations
+
+Data Change Validation proves operations match, but not that every *value* in every *column* matches.
+A full audit normally means hashing both sides and comparing — which, as above, breaks the moment the
+pipeline transforms anything. Hash Triangulation solves exactly those tricky cases.
+
+Rather than expecting `source_hash == destination_hash`, Seatbelt builds a map of
+`source_hash → destination_hash` for every row, computed **asynchronously from the source change log**,
+where the pipeline's transformation can be reproduced once, in one place. Then:
+
+1. Use Data Change Validation to isolate the **static** rows (filtering out live churn and anything
    already flagged).
-2. For each row, compute a cheap **source hash** with the fastest native function on the source
-   (`hashtextextended`, minimal load) and a deterministic **destination hash**.
+2. Compute a cheap **source hash** with the fastest native function on the source
+   (e.g., in Postgres, `hashtextextended`) — minimal load, just one hash per row crossing the wire — and a deterministic
+   **destination hash**.
 3. From the change log, maintain the `source_hash → destination_hash` map.
-4. Compare the observed `(source_hash, destination_hash)` pairs against the map. A mismatch is a
+4. Compare each row's observed `(source_hash, destination_hash)` pair against the map. A mismatch is a
    validation failure.
 
-This gives a full all-rows/all-columns audit with minimal source I/O, at the cost of writing a
-**row mapper** that reproduces how the pipeline transforms rows. Mappers compile to WebAssembly so
-you can write them in any language — see [`wasm-mappers/`](./wasm-mappers).
+Because the map is derived from the change log, it absorbs **every** legitimate transformation — JSON
+re-serialization, lossy type conversions, widening, precision changes — so the two hash domains never
+need to be equal. The price is a **row mapper** that reproduces how the pipeline transforms rows.
+Mappers compile to WebAssembly, so you can write one in any language without rebuilding Seatbelt —
+see [`wasm-mappers/`](./wasm-mappers).
 
 ## Repository layout
 
