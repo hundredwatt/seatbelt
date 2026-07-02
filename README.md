@@ -131,6 +131,51 @@ where the pipeline's transformation can be reproduced once, in one place. Then:
 4. Compare each row's observed `(source_hash, destination_hash)` pair against the map. A mismatch is a
    validation failure.
 
+```mermaid
+flowchart LR
+    ROW(["example row · id 42 · name 'Ada Lovelace' · active true"])
+
+    SRC[("Source<br/>PostgreSQL")]
+    DST[("Destination<br/>ClickHouse")]
+
+    ROW --> SRC
+    ROW -.->|"CDC pipeline under test"| DST
+
+    SRC -->|"hashed in place — only the number ships"| SSQL["SELECT hashtextextended(<br/>COALESCE(id::text,'👻') || … , 1337)"]
+    DST -->|"hashed in place"| DSQL["SELECT xxh3(concat(<br/>ifNull(CAST(id AS String),'👻'), … ))"]
+
+    SSQL --> SH(["source_hash<br/>-543580742752379863"])
+    DSQL --> DH(["destination_hash<br/>13610600688623386706"])
+
+    subgraph CONS["Seatbelt log consumer — builds the map from the change log"]
+        direction TB
+        SF["source form<br/>'42Ada Lovelacet'"]
+        DF["destination form<br/>'42Ada Lovelacetrue'"]
+        SF -->|"WASM row mapper"| DF
+        SF -->|hashtextextended| MAP{{"map entry<br/>-543580742752379863 → 13610600688623386706"}}
+        DF -->|xxh3| MAP
+    end
+
+    SRC -.->|"change log (WAL)"| SF
+
+    SH --> TRI{"observed pair<br/>in the map?"}
+    DH --> TRI
+    MAP -.-> TRI
+    TRI -->|"yes"| OK(["✓ Valid"])
+    TRI -->|"no"| ERR(["✗ Validation failure"])
+
+    classDef src stroke:#3b82c4,stroke-width:2px;
+    classDef dst stroke:#c98a1f,stroke-width:2px;
+    classDef con stroke:#1f9e78,stroke-width:2px;
+    classDef good stroke:#1f9e78,stroke-width:2px;
+    classDef bad stroke:#d24a47,stroke-width:2px;
+    class SRC,SSQL,SH src;
+    class DST,DSQL,DH dst;
+    class SF,DF,MAP con;
+    class OK good;
+    class ERR bad;
+```
+
 Because the map is derived from the change log, it absorbs **every** legitimate transformation — JSON
 re-serialization, lossy type conversions, widening, precision changes — so the two hash domains never
 need to be equal. The price is a **row mapper** that reproduces how the pipeline transforms rows.
